@@ -2,7 +2,7 @@
   "name": "@flprog/edit-app",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://phazz1980.github.io/Flprog_WebUI_Edit",
+  "homepage": "https://phazz1980.github.io/Flprog_WebUI_Editor",
   "dependencies": {
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
