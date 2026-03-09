@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/Flprog_WebUI_Edit/static/css/main.d442e3aa.css",
+    "main.js": "/Flprog_WebUI_Edit/static/js/main.19e7d82c.js",
+    "static/js/453.71d0cc4e.chunk.js": "/Flprog_WebUI_Edit/static/js/453.71d0cc4e.chunk.js",
+    "index.html": "/Flprog_WebUI_Edit/index.html",
+    "main.d442e3aa.css.map": "/Flprog_WebUI_Edit/static/css/main.d442e3aa.css.map",
+    "main.19e7d82c.js.map": "/Flprog_WebUI_Edit/static/js/main.19e7d82c.js.map",
+    "453.71d0cc4e.chunk.js.map": "/Flprog_WebUI_Edit/static/js/453.71d0cc4e.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.d442e3aa.css",
+    "static/js/main.19e7d82c.js"
+  ]
+}
