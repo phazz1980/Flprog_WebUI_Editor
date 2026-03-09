@@ -1,15 +1,15 @@
 {
   "files": {
-    "main.css": "/Flprog_WebUI_Edit/static/css/main.d442e3aa.css",
-    "main.js": "/Flprog_WebUI_Edit/static/js/main.19e7d82c.js",
-    "static/js/453.71d0cc4e.chunk.js": "/Flprog_WebUI_Edit/static/js/453.71d0cc4e.chunk.js",
-    "index.html": "/Flprog_WebUI_Edit/index.html",
-    "main.d442e3aa.css.map": "/Flprog_WebUI_Edit/static/css/main.d442e3aa.css.map",
-    "main.19e7d82c.js.map": "/Flprog_WebUI_Edit/static/js/main.19e7d82c.js.map",
-    "453.71d0cc4e.chunk.js.map": "/Flprog_WebUI_Edit/static/js/453.71d0cc4e.chunk.js.map"
+    "main.css": "/Flprog_WebUI_Editor/static/css/main.d442e3aa.css",
+    "main.js": "/Flprog_WebUI_Editor/static/js/main.c294dd38.js",
+    "static/js/453.71d0cc4e.chunk.js": "/Flprog_WebUI_Editor/static/js/453.71d0cc4e.chunk.js",
+    "index.html": "/Flprog_WebUI_Editor/index.html",
+    "main.d442e3aa.css.map": "/Flprog_WebUI_Editor/static/css/main.d442e3aa.css.map",
+    "main.c294dd38.js.map": "/Flprog_WebUI_Editor/static/js/main.c294dd38.js.map",
+    "453.71d0cc4e.chunk.js.map": "/Flprog_WebUI_Editor/static/js/453.71d0cc4e.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.d442e3aa.css",
-    "static/js/main.19e7d82c.js"
+    "static/js/main.c294dd38.js"
   ]
 }
