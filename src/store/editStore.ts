@@ -42,6 +42,8 @@ export const useEditStore = create<EditState>((set) => ({
     localStorage.setItem(KEY.widgets, JSON.stringify(widgets));
   },
   addWidget: (type) => set((state) => {
+    const GRID = 10;
+    const snap = (n: number) => Math.round(n / GRID) * GRID;
     const short: Record<string, string> = { button: 'btn', slider: 'sl', input: 'in', led: 'led', label: 'lbl', rect: 'r', switch: 'sw' };
     const prefix = short[type] ?? type;
     const id = `${prefix}_${Math.floor(Math.random() * 1000)}`;
@@ -51,10 +53,10 @@ export const useEditStore = create<EditState>((set) => ({
       {
         id,
         type,
-        x: 50,
-        y: 50,
-        width: type === 'slider' ? 200 : type === 'led' ? 30 : type === 'switch' ? 60 : 120,
-        height: type === 'slider' ? 20 : type === 'led' ? 30 : type === 'switch' ? 30 : 40,
+        x: snap(50),
+        y: snap(50),
+        width: snap(type === 'slider' ? 200 : type === 'led' ? 30 : type === 'switch' ? 60 : 120),
+        height: snap(type === 'slider' ? 20 : type === 'led' ? 30 : type === 'switch' ? 30 : 40),
         text: type === 'button'
           ? 'Button'
           : type === 'input'
@@ -107,6 +109,8 @@ export const useEditStore = create<EditState>((set) => ({
   })),
   pasteWidget: () => set((state) => {
     if (!state.clipboard) return state;
+    const GRID = 10;
+    const snap = (n: number) => Math.round(n / GRID) * GRID;
     const short: Record<string, string> = { button: 'btn', slider: 'sl', input: 'in', led: 'led', label: 'lbl', rect: 'r', switch: 'sw' };
     const prefix = short[state.clipboard.type] ?? state.clipboard.type;
     const newId = `${prefix}_${Math.floor(Math.random() * 1000)}`;
@@ -114,8 +118,8 @@ export const useEditStore = create<EditState>((set) => ({
       ...state.clipboard,
       id: newId,
       varName: newId,
-      x: state.clipboard.x + 20,
-      y: state.clipboard.y + 20,
+      x: snap(state.clipboard.x + 20),
+      y: snap(state.clipboard.y + 20),
     };
     const newWidgets = [...state.widgets, newWidget];
     localStorage.setItem(KEY.widgets, JSON.stringify(newWidgets));
