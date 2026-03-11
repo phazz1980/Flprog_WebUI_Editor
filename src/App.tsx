@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { generateArduinoCode } from './generator';
@@ -6,25 +6,18 @@ import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
 import { Widget } from './types';
+import { GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
+
+const MOBILE_BREAKPOINT = 768;
 import './App.css';
 
 const Stage = (props: any) => <KonvaStage {...props}>{props.children}</KonvaStage>;
 const Layer = (props: any) => <KonvaLayer {...props}>{props.children}</KonvaLayer>;
 
-const GRID_SIZE = 10;
-/** Сетка в логических координатах канвы (шаг 10). */
-const snapToGrid = (value: number) => Math.round(Math.round(value / GRID_SIZE) * GRID_SIZE);
-/** Привязка в дизайн-пикселях так, чтобы логическая позиция (value/scale) была кратна GRID_SIZE. */
-const snapDesignToGrid = (value: number, scale: number) => {
-  const logical = value / scale;
-  const snappedLogical = Math.round(logical / GRID_SIZE) * GRID_SIZE;
-  return Math.round(snappedLogical * scale);
-};
-
-const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displayScale = 1, canvasBgColor = '#ffffff' }: any) => {
+/** Виджеты хранятся и рисуются в дизайн-единицах канваса (0..width, 0..height), чтобы масштаб канвы одинаково масштабировал сетку и виджеты. */
+const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgColor = '#ffffff' }: any) => {
   const shapeRef = useRef<Konva.Group>(null);
   const trRef = useRef<Konva.Transformer>(null);
-  const invScale = 1 / displayScale;
   const captionBg = canvasBgColor;
   const widgetBg = shapeProps.type === 'switch'
     ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb')
@@ -39,10 +32,8 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
     }
   }, [isSelected]);
 
-  const lx = shapeProps.x * invScale;
-  const ly = shapeProps.y * invScale;
-  const lw = shapeProps.width * invScale;
-  const lh = shapeProps.height * invScale;
+  const lw = shapeProps.width;
+  const lh = shapeProps.height;
   const textHeight = 0.85 * lh;
   const textY = (lh - textHeight) / 2;
   const textFontSize = Math.max(8, textHeight * 0.65);
@@ -51,20 +42,24 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
     <>
       <Group
         draggable
-        x={lx}
-        y={ly}
+        x={shapeProps.x}
+        y={shapeProps.y}
         ref={shapeRef}
         onClick={onSelect}
         onTap={onSelect}
-        dragBoundFunc={(pos: { x: number; y: number }) => ({
-          x: snapToGrid(pos.x),
-          y: snapToGrid(pos.y),
-        })}
+        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
+          const pos = e.target.position();
+          e.target.position({
+            x: snapToGrid(pos.x),
+            y: snapToGrid(pos.y),
+          });
+        }}
         onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
+          const pos = e.target.position();
           onChange({
             ...shapeProps,
-            x: snapDesignToGrid(e.target.x() * displayScale, displayScale),
-            y: snapDesignToGrid(e.target.y() * displayScale, displayScale),
+            x: snapToGrid(pos.x),
+            y: snapToGrid(pos.y),
           });
         }}
         onTransformEnd={() => {
@@ -78,10 +73,10 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
           const newHeight = Math.max(10, shapeProps.height * scaleY);
           onChange({
             ...shapeProps,
-            x: snapDesignToGrid(node.x() * displayScale, displayScale),
-            y: snapDesignToGrid(node.y() * displayScale, displayScale),
-            width: snapDesignToGrid(newWidth, displayScale),
-            height: snapDesignToGrid(newHeight, displayScale),
+            x: snapToGrid(node.x()),
+            y: snapToGrid(node.y()),
+            width: snapToGrid(newWidth),
+            height: snapToGrid(newHeight),
           });
         }}
       >
@@ -89,13 +84,13 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
           <Text
             text={shapeProps.caption}
             x={0}
-            y={-18 * invScale}
+            y={-18}
             width={lw}
-            height={18 * invScale}
+            height={18}
             align="center"
             verticalAlign="middle"
             fill={textOnCaption}
-            fontSize={12 * invScale}
+            fontSize={12}
             listening={false}
           />
         )}
@@ -106,8 +101,8 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
             y={lw / 2}
             fill={shapeProps.text === '1' ? shapeProps.color : '#333'}
             stroke="#111"
-            strokeWidth={2 * invScale}
-            shadowBlur={shapeProps.text === '1' ? 15 * invScale : 0}
+            strokeWidth={2}
+            shadowBlur={shapeProps.text === '1' ? 15 : 0}
             shadowColor={shapeProps.color}
           />
         ) : shapeProps.type === 'label' ? (
@@ -119,7 +114,7 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
             height={textHeight}
             align="left"
             verticalAlign="middle"
-            fill={contrastColor(shapeProps.color === 'transparent' ? captionBg : shapeProps.color)}
+            fill={shapeProps.color}
             fontSize={textFontSize}
           />
         ) : (
@@ -128,27 +123,27 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
             height={lh}
             fill={shapeProps.type === 'switch' ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb') : shapeProps.color}
             stroke={shapeProps.type === 'input' ? '#ddd' : undefined}
-            strokeWidth={shapeProps.type === 'input' ? 1 * invScale : 0}
-            cornerRadius={(shapeProps.type === 'button' ? 5 : shapeProps.type === 'input' ? 2 : shapeProps.type === 'switch' ? lh / 2 : 10) * invScale}
-            shadowBlur={isSelected ? 5 * invScale : 0}
+            strokeWidth={shapeProps.type === 'input' ? 1 : 0}
+            cornerRadius={shapeProps.type === 'button' ? 5 : shapeProps.type === 'input' ? 2 : shapeProps.type === 'switch' ? lh / 2 : 10}
+            shadowBlur={isSelected ? 5 : 0}
           />
         )}
         {shapeProps.type === 'switch' && (
           <Circle
-            radius={lh / 2 - 3 * invScale}
+            radius={lh / 2 - 3}
             x={shapeProps.text === '1' ? lw - lh / 2 : lh / 2}
             y={lh / 2}
             fill="#ffffff"
-            shadowBlur={4 * invScale}
+            shadowBlur={4}
             shadowColor="rgba(0,0,0,0.15)"
           />
         )}
         {shapeProps.type === 'slider' && (
           <Text
             text={shapeProps.text ?? ''}
-            x={lw + 8 * invScale}
+            x={lw + 8}
             y={textY}
-            width={50 * invScale}
+            width={50}
             height={textHeight}
             align="left"
             verticalAlign="middle"
@@ -174,8 +169,8 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, displaySc
         <Transformer
           ref={trRef}
           boundBoxFunc={(oldBox: any, newBox: any) => {
-            const minW = 20 * invScale;
-            const minH = 10 * invScale;
+            const minW = 20;
+            const minH = 10;
             if (newBox.width < minW || newBox.height < minH) return oldBox;
             return newBox;
           }}
@@ -206,23 +201,62 @@ function App() {
     renameTab,
   } = useEditStore();
 
-  const { width: viewportW, height: viewportH } = useViewportSize();
-  const margin = 20;
-  const maxW = Math.max(1, viewportW - margin);
-  const maxH = Math.max(1, viewportH - margin);
-  const scale =
-    canvasConfig.width > 0 && canvasConfig.height > 0
-      ? Math.min(maxW / canvasConfig.width, maxH / canvasConfig.height)
-      : 1;
+  const [canvasZoom, setCanvasZoom] = useState(1);
+  const { width: viewportW } = useViewportSize();
+  const MOBILE_BREAKPOINT = 768;
+  const isMobile = viewportW <= MOBILE_BREAKPOINT;
+  const baseScale = isMobile && canvasConfig.width > 0
+    ? Math.max(0.5, (viewportW - 24) / canvasConfig.width)
+    : PIXELS_PER_UNIT;
+  const scale = baseScale * canvasZoom;
   const displayWidth = Math.round(canvasConfig.width * scale);
   const displayHeight = Math.round(canvasConfig.height * scale);
+
+  const zoomStep = 0.1;
+  const zoomMin = 0.25;
+  const zoomMax = 3;
+  const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const [showCode, setShowCode] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
   const [showLeftPanel, setShowLeftPanel] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(false);
+  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [customProportionSelected, setCustomProportionSelected] = useState(false);
+  const [lastCustomRatioString, setLastCustomRatioString] = useState<string | null>(null);
+
+  const RATIOS = { pc: [16, 9] as const, tablet: [4, 3] as const, mobile: [9, 16] as const };
+  const proportionValue = (() => {
+    const r = canvasConfig.width / canvasConfig.height;
+    const entries: [string, number, number][] = [['pc', 16, 9], ['tablet', 4, 3], ['mobile', 9, 16]];
+    const match = entries.find(([, rw, rh]) => Math.abs(r - rw / rh) < 0.01);
+    return match ? match[0] : 'custom';
+  })();
+
+  const proportionSelectValue = customProportionSelected ? 'custom' : proportionValue;
+
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const ratioDisplay = (() => {
+    const g = gcd(canvasConfig.width, canvasConfig.height);
+    return g ? `${canvasConfig.width / g}:${canvasConfig.height / g}` : `${canvasConfig.width}:${canvasConfig.height}`;
+  })();
+
+  const applyRatioFromString = (s: string) => {
+    const parts = String(s).trim().split(/[:\s×x]/);
+    const a = Math.max(1, Math.round(Number(parts[0]) || 1));
+    const b = Math.max(1, Math.round(Number(parts[1]) || 1));
+    setLastCustomRatioString(`${a}:${b}`);
+    const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
+    const newWidth = a >= b ? maxCurrent : Math.round(maxCurrent * a / b);
+    const newHeight = a >= b ? Math.round(maxCurrent * b / a) : maxCurrent;
+    updateCanvas({ width: newWidth, height: newHeight });
+  };
   const [previewCanvasColor, setPreviewCanvasColor] = useState<string | null>(null);
   const [previewWidgetColor, setPreviewWidgetColor] = useState<string | null>(null);
+  /** Локальные строки при вводе X/Y/Ш/В (позволяют набрать "50%" и применить по blur) */
+  const [editXYWH, setEditXYWH] = useState<{ x?: string; y?: string; w?: string; h?: string }>({});
   const canvasColorRef = useRef<HTMLInputElement>(null);
   const widgetColorRef = useRef<HTMLInputElement>(null);
   const throttleCanvasRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,6 +303,7 @@ function App() {
 
   useEffect(() => {
     setPreviewWidgetColor(null);
+    setEditXYWH({});
   }, [selectedId]);
 
   const canvasBg = previewCanvasColor ?? canvasConfig.color;
@@ -366,21 +401,48 @@ function App() {
     }
   };
 
+  const moveSelectedWidget = useCallback((dx: number, dy: number) => {
+    const state = useEditStore.getState();
+    const id = state.selectedId;
+    if (!id) return;
+    const w = state.widgets.find((x) => x.id === id);
+    if (!w) return;
+    const cw = state.canvasConfig.width;
+    const ch = state.canvasConfig.height;
+    const x = snapToGrid(w.x + dx);
+    const y = snapToGrid(w.y + dy);
+    const x2 = Math.max(0, Math.min(cw - w.width, x));
+    const y2 = Math.max(0, Math.min(ch - w.height, y));
+    state.updateWidget(id, { x: x2, y: y2 });
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) removeWidget(selectedId);
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedId) { e.preventDefault(); copyWidget(selectedId); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') { e.preventDefault(); pasteWidget(); }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && selectedId) { e.preventDefault(); copyWidget(selectedId); }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') { e.preventDefault(); pasteWidget(); }
+      if (selectedId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); moveSelectedWidget(-GRID_SIZE, 0); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); moveSelectedWidget(GRID_SIZE, 0); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); moveSelectedWidget(0, -GRID_SIZE); }
+        if (e.key === 'ArrowDown') { e.preventDefault(); moveSelectedWidget(0, GRID_SIZE); }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, removeWidget, copyWidget, pasteWidget]);
+  }, [selectedId, removeWidget, copyWidget, pasteWidget, moveSelectedWidget]);
 
   return (
     <div className="App app-root">
-      <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
-        <h3 style={{ marginTop: 0 }}>Widgets</h3>
+      {!leftPanelVisible && (
+        <button type="button" className="panel-restore panel-restore-left" onClick={() => setLeftPanelVisible(true)} title="Показать панель виджетов">◀</button>
+      )}
+      <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'} ${!leftPanelVisible ? 'sidebar-collapsed' : ''}`}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Widgets</h3>
+          <button type="button" className="panel-hide-btn" onClick={() => { setLeftPanelVisible(false); setShowLeftPanel(false); }} title="Скрыть панель">◀</button>
+        </div>
         <button className="widget-button" onClick={() => addWidget('button')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>
           <span className="widget-icon">🔘</span><span>Add Button</span>
         </button>
@@ -407,23 +469,16 @@ function App() {
         <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>Соотношение сторон (логич. ед., не зависят от PPI)</p>
         <label style={{ fontSize: '12px' }}>Пропорции:</label>
         <select
-          value={(() => {
-            const r = canvasConfig.width / canvasConfig.height;
-            const ratios: [string, number, number][] = [
-              ['16:9', 16, 9], ['3:4', 3, 4], ['4:3', 4, 3], ['1:1', 1, 1],
-              ['2:3', 2, 3], ['3:2', 3, 2], ['9:16', 9, 16], ['21:9', 21, 9],
-            ];
-            const match = ratios.find(([, rw, rh]) => Math.abs(r - rw / rh) < 0.01);
-            return match ? match[0] : 'custom';
-          })()}
+          value={proportionSelectValue}
           onChange={(e) => {
             const v = e.target.value;
-            if (v === 'custom') return;
-            const ratios: Record<string, [number, number]> = {
-              '16:9': [16, 9], '3:4': [3, 4], '4:3': [4, 3], '1:1': [1, 1],
-              '2:3': [2, 3], '3:2': [3, 2], '9:16': [9, 16], '21:9': [21, 9],
-            };
-            const [rW, rH] = ratios[v] ?? [16, 9];
+            if (v === 'custom') {
+              setCustomProportionSelected(true);
+              return;
+            }
+            setCustomProportionSelected(false);
+            setLastCustomRatioString(null);
+            const [rW, rH] = (v === 'pc' || v === 'tablet' || v === 'mobile') ? RATIOS[v] : [16, 9];
             const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
             const newWidth = rW >= rH ? maxCurrent : Math.round(maxCurrent * rW / rH);
             const newHeight = rW >= rH ? Math.round(maxCurrent * rH / rW) : maxCurrent;
@@ -431,20 +486,34 @@ function App() {
           }}
           style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
         >
-          <option value="16:9">16:9</option>
-          <option value="3:4">3:4</option>
-          <option value="4:3">4:3</option>
-          <option value="1:1">1:1</option>
-          <option value="2:3">2:3</option>
-          <option value="3:2">3:2</option>
-          <option value="9:16">9:16</option>
-          <option value="21:9">21:9</option>
+          <option value="pc">ПК (16:9)</option>
+          <option value="tablet">Планшет (4:3)</option>
+          <option value="mobile">Мобильный (9:16)</option>
           <option value="custom">Свои значения</option>
         </select>
-        <label style={{ fontSize: '12px' }}>Ширина:</label>
-        <input type="number" min={1} value={canvasConfig.width} onChange={(e) => updateCanvas({ width: Number(e.target.value) || 1 })} style={{ width: '100%', marginBottom: '5px' }} />
-        <label style={{ fontSize: '12px' }}>Высота:</label>
-        <input type="number" min={1} value={canvasConfig.height} onChange={(e) => updateCanvas({ height: Number(e.target.value) || 1 })} style={{ width: '100%', marginBottom: '5px' }} />
+        {proportionSelectValue === 'custom' && (
+          <>
+            <label style={{ fontSize: '12px' }}>Пропорции (например 3:4):</label>
+            <input
+              key={`ratio-${canvasConfig.width}-${canvasConfig.height}-${lastCustomRatioString ?? ''}`}
+              type="text"
+              placeholder="3:4"
+              defaultValue={lastCustomRatioString ?? ratioDisplay}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (/^\d+[:\s×x]\d+$/.test(v)) applyRatioFromString(v);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const v = (e.target as HTMLInputElement).value.trim();
+                  if (/^\d+[:\s×x]\d+$/.test(v)) applyRatioFromString(v);
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
+            />
+          </>
+        )}
         <label style={{ fontSize: '12px' }}>Цвет фона:</label>
         <input
           ref={canvasColorRef}
@@ -477,6 +546,37 @@ function App() {
           >
             ✎
           </button>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={() => setGridVisible((v) => !v)}
+            title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
+          >
+            Сетка {gridVisible ? '▣' : '☐'}
+          </button>
+          <span style={{ marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+            <button
+              type="button"
+              className="tab-rename-button"
+              onClick={() => setZoom(canvasZoom - zoomStep)}
+              disabled={canvasZoom <= zoomMin}
+              title="Уменьшить масштаб"
+            >
+              −
+            </button>
+            <span style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
+              {Math.round(canvasZoom * 100)}%
+            </span>
+            <button
+              type="button"
+              className="tab-rename-button"
+              onClick={() => setZoom(canvasZoom + zoomStep)}
+              disabled={canvasZoom >= zoomMax}
+              title="Увеличить масштаб"
+            >
+              +
+            </button>
+          </span>
         </div>
         <button className="mobile-toggle mobile-toggle-left" onClick={() => setShowLeftPanel((prev) => !prev)}>☰</button>
         <button className="mobile-toggle mobile-toggle-right" onClick={() => setShowRightPanel((prev) => !prev)}>⚙</button>
@@ -497,12 +597,16 @@ function App() {
             <Stage width={displayWidth} height={displayHeight} onMouseDown={(e: any) => { if (e.target === e.target.getStage()) selectWidget(null); }}>
               <Layer>
                 <Group scaleX={scale} scaleY={scale}>
-                  {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
-                    <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={i % 5 === 0 ? gridStrokeMajor : gridStrokeMinor} strokeWidth={1} />
-                  ))}
-                  {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
-                    <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={i % 5 === 0 ? gridStrokeMajor : gridStrokeMinor} strokeWidth={1} />
-                  ))}
+                  {gridVisible && (
+                    <>
+                      {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
+                        <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
+                      ))}
+                      {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
+                        <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={gridStrokeMinor} strokeWidth={1} />
+                      ))}
+                    </>
+                  )}
                   {widgets.filter((w: Widget) => (w.tabId || 'tab_1') === activeTabId).map((w: Widget) => (
                     <WidgetComponent
                       key={w.id}
@@ -510,7 +614,6 @@ function App() {
                       isSelected={w.id === selectedId}
                       onSelect={() => selectWidget(w.id)}
                       onChange={(attrs: any) => updateWidget(w.id, attrs)}
-                      displayScale={scale}
                       canvasBgColor={previewCanvasColor ?? canvasConfig.color}
                     />
                   ))}
@@ -521,11 +624,118 @@ function App() {
         </div>
       </div>
 
-      <div className={`sidebar sidebar-right ${showRightPanel ? 'mobile-open' : 'mobile-closed'}`}>
+      {!rightPanelVisible && (
+        <button type="button" className="panel-restore panel-restore-right" onClick={() => setRightPanelVisible(true)} title="Показать панель свойств">▶</button>
+      )}
+      <div className={`sidebar sidebar-right ${showRightPanel ? 'mobile-open' : 'mobile-closed'} ${!rightPanelVisible ? 'sidebar-collapsed' : ''}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowRightPanel(false)}>×</button>
-        <h3>Properties</h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Properties</h3>
+          <button type="button" className="panel-hide-btn" onClick={() => { setRightPanelVisible(false); setShowRightPanel(false); }} title="Скрыть панель">▶</button>
+        </div>
         {selectedId ? (
           <div>
+            {(() => {
+              const selectedWidget = widgets.find((w) => w.id === selectedId);
+              if (!selectedWidget) return null;
+              return (
+                <>
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>Размер и расположение</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', minWidth: '14px' }}>X</span>
+                        <input
+                          type="text"
+                          value={editXYWH.x !== undefined ? editXYWH.x : String(selectedWidget.x)}
+                          onFocus={() => setEditXYWH((prev) => ({ ...prev, x: String(selectedWidget.x) }))}
+                          onChange={(e) => setEditXYWH((prev) => ({ ...prev, x: e.target.value }))}
+                          onBlur={() => {
+                            const raw = (editXYWH.x ?? String(selectedWidget.x)).trim();
+                            const isPct = /%\s*$/.test(raw);
+                            const numStr = raw.replace(/%\s*$/, '').trim();
+                            const v = Number(numStr);
+                            if (Number.isFinite(v)) {
+                              const x = isPct ? (canvasConfig.width * v) / 100 : v;
+                              const xClamped = snapToGrid(Math.max(0, Math.min(canvasConfig.width - (selectedWidget.width || 0), x)));
+                              updateWidget(selectedId, { x: xClamped });
+                            }
+                            setEditXYWH((prev) => ({ ...prev, x: undefined }));
+                          }}
+                          style={{ flex: 1, minWidth: 0, maxWidth: '3.5rem', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                        <span style={{ fontSize: '11px', minWidth: '14px' }}>Y</span>
+                        <input
+                          type="text"
+                          value={editXYWH.y !== undefined ? editXYWH.y : String(selectedWidget.y)}
+                          onFocus={() => setEditXYWH((prev) => ({ ...prev, y: String(selectedWidget.y) }))}
+                          onChange={(e) => setEditXYWH((prev) => ({ ...prev, y: e.target.value }))}
+                          onBlur={() => {
+                            const raw = (editXYWH.y ?? String(selectedWidget.y)).trim();
+                            const isPct = /%\s*$/.test(raw);
+                            const numStr = raw.replace(/%\s*$/, '').trim();
+                            const v = Number(numStr);
+                            if (Number.isFinite(v)) {
+                              const y = isPct ? (canvasConfig.height * v) / 100 : v;
+                              const yClamped = snapToGrid(Math.max(0, Math.min(canvasConfig.height - (selectedWidget.height || 0), y)));
+                              updateWidget(selectedId, { y: yClamped });
+                            }
+                            setEditXYWH((prev) => ({ ...prev, y: undefined }));
+                          }}
+                          style={{ flex: 1, minWidth: 0, maxWidth: '3.5rem', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', minWidth: '14px' }}>Ш</span>
+                        <input
+                          type="text"
+                          value={editXYWH.w !== undefined ? editXYWH.w : String(selectedWidget.width)}
+                          onFocus={() => setEditXYWH((prev) => ({ ...prev, w: String(selectedWidget.width) }))}
+                          onChange={(e) => setEditXYWH((prev) => ({ ...prev, w: e.target.value }))}
+                          onBlur={() => {
+                            const raw = (editXYWH.w ?? String(selectedWidget.width)).trim();
+                            const isPct = /%\s*$/.test(raw);
+                            const numStr = raw.replace(/%\s*$/, '').trim();
+                            const v = Number(numStr);
+                            if (Number.isFinite(v)) {
+                              const width = isPct ? (canvasConfig.width * v) / 100 : v;
+                              const widthClamped = snapToGrid(Math.max(20, Math.min(canvasConfig.width, width)));
+                              const maxX = canvasConfig.width - widthClamped;
+                              const x = selectedWidget.x > maxX ? snapToGrid(maxX) : selectedWidget.x;
+                              updateWidget(selectedId, { width: widthClamped, ...(selectedWidget.x > maxX ? { x } : {}) });
+                            }
+                            setEditXYWH((prev) => ({ ...prev, w: undefined }));
+                          }}
+                          style={{ flex: 1, minWidth: 0, maxWidth: '3.5rem', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                        <span style={{ fontSize: '11px', minWidth: '14px' }}>В</span>
+                        <input
+                          type="text"
+                          value={editXYWH.h !== undefined ? editXYWH.h : String(selectedWidget.height)}
+                          onFocus={() => setEditXYWH((prev) => ({ ...prev, h: String(selectedWidget.height) }))}
+                          onChange={(e) => setEditXYWH((prev) => ({ ...prev, h: e.target.value }))}
+                          onBlur={() => {
+                            const raw = (editXYWH.h ?? String(selectedWidget.height)).trim();
+                            const isPct = /%\s*$/.test(raw);
+                            const numStr = raw.replace(/%\s*$/, '').trim();
+                            const v = Number(numStr);
+                            if (Number.isFinite(v)) {
+                              const height = isPct ? (canvasConfig.height * v) / 100 : v;
+                              const heightClamped = snapToGrid(Math.max(10, Math.min(canvasConfig.height, height)));
+                              const maxY = canvasConfig.height - heightClamped;
+                              const y = selectedWidget.y > maxY ? snapToGrid(maxY) : selectedWidget.y;
+                              updateWidget(selectedId, { height: heightClamped, ...(selectedWidget.y > maxY ? { y } : {}) });
+                            }
+                            setEditXYWH((prev) => ({ ...prev, h: undefined }));
+                          }}
+                          style={{ flex: 1, minWidth: 0, maxWidth: '3.5rem', padding: '4px 6px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
             {(() => {
               const selectedWidget = widgets.find((w) => w.id === selectedId);
               if (!selectedWidget || selectedWidget.type === 'rect') return null;
@@ -567,7 +777,7 @@ function App() {
                   <input
                     type="text"
                     value={selectedWidget.varName || ''}
-                    onChange={(e) => updateWidget(selectedId, { varName: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })}
+                    onChange={(e) => updateWidget(selectedId, { varName: e.target.value.replace(/[^a-zA-Z0-9_\u0400-\u04FF]/g, '') })}
                     style={{ width: '100%', marginBottom: '10px' }}
                   />
                   {!isBoolLocked && (

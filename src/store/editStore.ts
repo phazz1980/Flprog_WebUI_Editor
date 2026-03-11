@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Tab, Widget } from '../types';
+import { snapToGrid } from '../constants';
 
 interface EditState {
   widgets: Widget[];
@@ -42,8 +43,6 @@ export const useEditStore = create<EditState>((set) => ({
     localStorage.setItem(KEY.widgets, JSON.stringify(widgets));
   },
   addWidget: (type) => set((state) => {
-    const GRID = 10;
-    const snap = (n: number) => Math.round(n / GRID) * GRID;
     const short: Record<string, string> = { button: 'btn', slider: 'sl', input: 'in', led: 'led', label: 'lbl', rect: 'r', switch: 'sw' };
     const prefix = short[type] ?? type;
     const id = `${prefix}_${Math.floor(Math.random() * 1000)}`;
@@ -53,10 +52,10 @@ export const useEditStore = create<EditState>((set) => ({
       {
         id,
         type,
-        x: snap(50),
-        y: snap(50),
-        width: snap(type === 'slider' ? 200 : type === 'led' ? 30 : type === 'switch' ? 60 : 120),
-        height: snap(type === 'slider' ? 20 : type === 'led' ? 30 : type === 'switch' ? 30 : 40),
+        x: snapToGrid(50),
+        y: snapToGrid(50),
+        width: snapToGrid(type === 'slider' ? 200 : type === 'led' ? 30 : type === 'switch' ? 60 : 120),
+        height: snapToGrid(type === 'slider' ? 20 : type === 'led' ? 30 : type === 'switch' ? 30 : 40),
         text: type === 'button'
           ? 'Button'
           : type === 'input'
@@ -67,7 +66,7 @@ export const useEditStore = create<EditState>((set) => ({
                 ? '0'
                 : undefined,
         caption: type === 'rect' ? undefined : '',
-        color: type === 'input' ? '#ffffff' : type === 'led' ? '#ff0000' : type === 'label' ? 'transparent' : type === 'rect' ? '#cccccc' : type === 'switch' ? '#10b981' : '#3b82f6',
+        color: type === 'input' ? '#ffffff' : type === 'led' ? '#ff0000' : type === 'rect' ? '#cccccc' : type === 'switch' ? '#10b981' : '#3b82f6',
         varName: id,
         varType: type === 'button' || type === 'led' || type === 'switch' ? 'bool' : type === 'slider' ? 'int' : type === 'rect' ? 'none' : 'String',
         tabId: currentTabId,
@@ -82,10 +81,10 @@ export const useEditStore = create<EditState>((set) => ({
       const updated = { ...w, ...attrs };
       return {
         ...updated,
-        x: attrs.x !== undefined ? Math.round(updated.x) : updated.x,
-        y: attrs.y !== undefined ? Math.round(updated.y) : updated.y,
-        width: attrs.width !== undefined ? Math.round(updated.width) : updated.width,
-        height: attrs.height !== undefined ? Math.round(updated.height) : updated.height,
+        x: attrs.x !== undefined ? snapToGrid(updated.x) : updated.x,
+        y: attrs.y !== undefined ? snapToGrid(updated.y) : updated.y,
+        width: attrs.width !== undefined ? snapToGrid(updated.width) : updated.width,
+        height: attrs.height !== undefined ? snapToGrid(updated.height) : updated.height,
       };
     });
     localStorage.setItem(KEY.widgets, JSON.stringify(newWidgets));
@@ -109,8 +108,6 @@ export const useEditStore = create<EditState>((set) => ({
   })),
   pasteWidget: () => set((state) => {
     if (!state.clipboard) return state;
-    const GRID = 10;
-    const snap = (n: number) => Math.round(n / GRID) * GRID;
     const short: Record<string, string> = { button: 'btn', slider: 'sl', input: 'in', led: 'led', label: 'lbl', rect: 'r', switch: 'sw' };
     const prefix = short[state.clipboard.type] ?? state.clipboard.type;
     const newId = `${prefix}_${Math.floor(Math.random() * 1000)}`;
@@ -118,8 +115,8 @@ export const useEditStore = create<EditState>((set) => ({
       ...state.clipboard,
       id: newId,
       varName: newId,
-      x: snap(state.clipboard.x + 20),
-      y: snap(state.clipboard.y + 20),
+      x: snapToGrid(state.clipboard.x + 20),
+      y: snapToGrid(state.clipboard.y + 20),
     };
     const newWidgets = [...state.widgets, newWidget];
     localStorage.setItem(KEY.widgets, JSON.stringify(newWidgets));
