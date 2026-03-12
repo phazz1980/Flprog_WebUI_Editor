@@ -121,15 +121,47 @@ function ViewerWidget({
     }
   }, [widget.type, widget.id, displayText, onSetVar, varNameForSet]);
 
+  const buttonPressedRef = useRef(false);
+  const handleButtonDown = useCallback(() => {
+    if (widget.type !== 'button' || !onSetVar) return;
+    buttonPressedRef.current = true;
+    onSetVar(varNameForSet, '1');
+  }, [widget.type, onSetVar, varNameForSet]);
+
+  const handleButtonUp = useCallback(() => {
+    if (widget.type !== 'button' || !onSetVar) return;
+    buttonPressedRef.current = false;
+    onSetVar(varNameForSet, '0');
+  }, [widget.type, onSetVar, varNameForSet]);
+
+  useEffect(() => {
+    if (widget.type !== 'button' || !onSetVar) return;
+    const onGlobalUp = () => {
+      if (!buttonPressedRef.current) return;
+      buttonPressedRef.current = false;
+      onSetVar(varNameForSet, '0');
+    };
+    window.addEventListener('pointerup', onGlobalUp);
+    window.addEventListener('touchend', onGlobalUp);
+    return () => {
+      window.removeEventListener('pointerup', onGlobalUp);
+      window.removeEventListener('touchend', onGlobalUp);
+    };
+  }, [widget.type, onSetVar, varNameForSet]);
+
   const isClickable = widget.type === 'button' || widget.type === 'switch';
+  const isButton = widget.type === 'button';
 
   return (
     <Group
       x={widget.x}
       y={widget.y}
       ref={shapeRef}
-      onClick={isClickable ? handleClick : undefined}
-      onTap={isClickable ? handleClick : undefined}
+      onClick={!isButton && isClickable ? handleClick : undefined}
+      onTap={!isButton && isClickable ? handleClick : undefined}
+      onPointerDown={isButton ? handleButtonDown : undefined}
+      onPointerUp={isButton ? handleButtonUp : undefined}
+      onPointerUpOutside={isButton ? handleButtonUp : undefined}
       listening={true}
     >
       {/* caption в компактном формате /config не передаётся — не рисуем */}
