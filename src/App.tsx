@@ -9,28 +9,44 @@ import { Widget } from './types';
 import { GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
 
 const MOBILE_BREAKPOINT = 768;
+const SIDEBAR_WIDTH = 220;
+const CANVAS_PANEL_GAP = 28;
 import './App.css';
 
-const Stage = (props: any) => <KonvaStage {...props}>{props.children}</KonvaStage>;
+/** Stage: use KonvaStage with relaxed types (react-konva typings are incomplete for Stage) */
+const Stage = KonvaStage as React.ComponentType<any>;
 const Layer = (props: any) => <KonvaLayer {...props}>{props.children}</KonvaLayer>;
 
 /** Виджеты хранятся и рисуются в дизайн-единицах канваса (0..width, 0..height), чтобы масштаб канвы одинаково масштабировал сетку и виджеты. */
-const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgColor = '#ffffff' }: any) => {
+const WidgetComponent = ({
+  shapeProps,
+  isSelected,
+  onSelect,
+  onChange,
+  canvasBgColor = '#ffffff',
+  isDemoMode = false,
+  demoDisplayValue,
+  onDemoClick,
+  onDemoSliderChange,
+  onDemoInputFocus,
+}: any) => {
   const shapeRef = useRef<Konva.Group>(null);
   const trRef = useRef<Konva.Transformer>(null);
+  const sliderTrackRef = useRef<Konva.Rect>(null);
   const captionBg = canvasBgColor;
+  const displayText = demoDisplayValue !== undefined ? demoDisplayValue : shapeProps.text;
   const widgetBg = shapeProps.type === 'switch'
-    ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb')
+    ? (displayText === '1' ? '#22c55e' : '#e5e7eb')
     : shapeProps.color;
   const textOnWidget = contrastColor(widgetBg);
   const textOnCaption = contrastColor(captionBg);
 
   useEffect(() => {
-    if (isSelected && trRef.current && shapeRef.current) {
+    if (!isDemoMode && isSelected && trRef.current && shapeRef.current) {
       trRef.current.nodes([shapeRef.current]);
       trRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected]);
+  }, [isSelected, isDemoMode]);
 
   const lw = shapeProps.width;
   const lh = shapeProps.height;
@@ -38,23 +54,49 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
   const textY = (lh - textHeight) / 2;
   const textFontSize = Math.max(8, textHeight * 0.65);
 
+  const handleDemoClick = () => {
+    if (!isDemoMode) return;
+    if (shapeProps.type === 'input') {
+      onDemoInputFocus?.(shapeProps.id);
+      return;
+    }
+    if (onDemoClick && (shapeProps.type === 'button' || shapeProps.type === 'switch' || shapeProps.type === 'led')) {
+      onDemoClick(shapeProps.id);
+    }
+  };
+
+  const handleSliderDrag = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (!isDemoMode || !onDemoSliderChange || shapeProps.type !== 'slider') return;
+    const group = shapeRef.current;
+    if (!group) return;
+    const pos = group.getRelativePointerPosition();
+    if (!pos) return;
+    const thumbRadius = Math.min(lh / 2 - 2, 8);
+    const trackWidth = lw - 2 * thumbRadius;
+    const mouseX = pos.x;
+    const value = Math.min(100, Math.max(0, ((mouseX - thumbRadius) / trackWidth) * 100));
+    onDemoSliderChange(shapeProps.id, Math.round(value));
+    sliderTrackRef.current?.position({ x: 0, y: 0 });
+  };
+
   return (
     <>
       <Group
-        draggable
+        draggable={!isDemoMode}
         x={shapeProps.x}
         y={shapeProps.y}
         ref={shapeRef}
-        onClick={onSelect}
-        onTap={onSelect}
-        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
+        onMouseDown={isDemoMode ? undefined : onSelect}
+        onTouchStart={isDemoMode ? undefined : onSelect}
+        onClick={isDemoMode ? handleDemoClick : undefined}
+        onTap={isDemoMode ? handleDemoClick : undefined}
+        onDragMove={isDemoMode ? undefined : (e: Konva.KonvaEventObject<DragEvent>) => {
           const pos = e.target.position();
-          e.target.position({
-            x: snapToGrid(pos.x),
-            y: snapToGrid(pos.y),
-          });
+          const snapped = { x: snapToGrid(pos.x), y: snapToGrid(pos.y) };
+          e.target.position(snapped);
+          onChange({ ...shapeProps, ...snapped });
         }}
-        onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
+        onDragEnd={isDemoMode ? undefined : (e: Konva.KonvaEventObject<DragEvent>) => {
           const pos = e.target.position();
           onChange({
             ...shapeProps,
@@ -62,7 +104,7 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
             y: snapToGrid(pos.y),
           });
         }}
-        onTransformEnd={() => {
+        onTransformEnd={isDemoMode ? undefined : () => {
           const node = shapeRef.current;
           if (!node) return;
           const scaleX = node.scaleX();
@@ -99,10 +141,10 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
             radius={lw / 2}
             x={lw / 2}
             y={lw / 2}
-            fill={shapeProps.text === '1' ? shapeProps.color : '#333'}
+            fill={displayText === '1' ? shapeProps.color : '#333'}
             stroke="#111"
             strokeWidth={2}
-            shadowBlur={shapeProps.text === '1' ? 15 : 0}
+            shadowBlur={displayText === '1' ? 15 : 0}
             shadowColor={shapeProps.color}
           />
         ) : shapeProps.type === 'label' ? (
@@ -121,7 +163,13 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
           <Rect
             width={lw}
             height={lh}
-            fill={shapeProps.type === 'switch' ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb') : shapeProps.color}
+            fill={
+              shapeProps.type === 'switch'
+                ? (displayText === '1' ? '#22c55e' : '#e5e7eb')
+                : shapeProps.type === 'button' && isDemoMode && displayText === '1'
+                  ? (() => { const c = shapeProps.color; if (c.startsWith('#')) { const n = parseInt(c.slice(1), 16); const r = Math.max(0, ((n >> 16) & 0xff) - 40); const g = Math.max(0, ((n >> 8) & 0xff) - 40); const b = Math.max(0, (n & 0xff) - 40); return `rgb(${r},${g},${b})`; } return c; })()
+                  : shapeProps.color
+            }
             stroke={shapeProps.type === 'input' ? '#ddd' : undefined}
             strokeWidth={shapeProps.type === 'input' ? 1 : 0}
             cornerRadius={shapeProps.type === 'button' ? 5 : shapeProps.type === 'input' ? 2 : shapeProps.type === 'switch' ? lh / 2 : 10}
@@ -131,29 +179,75 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
         {shapeProps.type === 'switch' && (
           <Circle
             radius={lh / 2 - 3}
-            x={shapeProps.text === '1' ? lw - lh / 2 : lh / 2}
+            x={displayText === '1' ? lw - lh / 2 : lh / 2}
             y={lh / 2}
             fill="#ffffff"
             shadowBlur={4}
             shadowColor="rgba(0,0,0,0.15)"
           />
         )}
-        {shapeProps.type === 'slider' && (
-          <Text
-            text={shapeProps.text ?? ''}
-            x={lw + 8}
-            y={textY}
-            width={50}
-            height={textHeight}
-            align="left"
-            verticalAlign="middle"
-            fill={textOnWidget}
-            fontSize={textFontSize}
+        {shapeProps.type === 'slider' && (() => {
+          const raw = displayText ?? '0';
+          const value = Math.min(100, Math.max(0, parseFloat(raw) || 0));
+          const thumbRadius = Math.min(lh / 2 - 2, 8);
+          const trackWidth = lw - 2 * thumbRadius;
+          const thumbX = thumbRadius + (value / 100) * trackWidth;
+          return (
+            <>
+              <Circle
+                x={thumbX}
+                y={lh / 2}
+                radius={thumbRadius}
+                fill="#ffffff"
+                stroke="#94a3b8"
+                strokeWidth={1}
+                shadowBlur={2}
+                shadowColor="rgba(0,0,0,0.2)"
+                listening={false}
+              />
+              <Text
+                text={displayText ?? ''}
+                x={lw + 8}
+                y={textY}
+                width={50}
+                height={textHeight}
+                align="left"
+                verticalAlign="middle"
+                fill={textOnCaption}
+                fontSize={textFontSize}
+              />
+            </>
+          );
+        })()}
+        {isDemoMode && shapeProps.type === 'slider' && onDemoSliderChange && (
+          <Rect
+            ref={sliderTrackRef}
+            x={0}
+            y={0}
+            width={lw}
+            height={lh}
+            fill="transparent"
+            listening={true}
+            draggable={true}
+            onDragMove={handleSliderDrag}
+            onDragEnd={handleSliderDrag}
+            onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => {
+              e.cancelBubble = true;
+              const group = shapeRef.current;
+              if (!group) return;
+              const pos = group.getRelativePointerPosition();
+              if (!pos) return;
+              const thumbRadius = Math.min(lh / 2 - 2, 8);
+              const trackWidth = lw - 2 * thumbRadius;
+              const mouseX = pos.x;
+              const value = Math.min(100, Math.max(0, ((mouseX - thumbRadius) / trackWidth) * 100));
+              onDemoSliderChange(shapeProps.id, Math.round(value));
+            }}
           />
         )}
         {(shapeProps.type === 'button' || shapeProps.type === 'input') && (
           <Text
-            text={shapeProps.text}
+            text={(shapeProps.type === 'input' && displayText !== undefined ? displayText : shapeProps.text) ?? ''}
             x={0}
             y={textY}
             width={lw}
@@ -199,14 +293,23 @@ function App() {
     addTab,
     setActiveTab,
     renameTab,
+    setWidgets,
   } = useEditStore();
 
   const [canvasZoom, setCanvasZoom] = useState(1);
-  const { width: viewportW } = useViewportSize();
+  const { width: viewportW, height: viewportH } = useViewportSize();
   const MOBILE_BREAKPOINT = 768;
+  const VIEWPORT_HEIGHT_MARGIN =70; // под шапку, панели и отступ снизу (9:16)
   const isMobile = viewportW <= MOBILE_BREAKPOINT;
-  const baseScale = isMobile && canvasConfig.width > 0
-    ? Math.max(0.5, (viewportW - 24) / canvasConfig.width)
+  const isPortraitCanvas = canvasConfig.height > canvasConfig.width; // 9:16 и т.п.
+  const isTablet43 = Math.abs(canvasConfig.width / canvasConfig.height - 4 / 3) < 0.01;
+  const isPc169 = Math.abs(canvasConfig.width / canvasConfig.height - 16 / 9) < 0.01;
+  const useFitScale = (isMobile || isPortraitCanvas || isTablet43 || isPc169) && canvasConfig.width > 0 && canvasConfig.height > 0;
+  const baseScale = useFitScale
+    ? Math.max(1, Math.min(
+        (viewportW - 24) / canvasConfig.width,
+        (viewportH - VIEWPORT_HEIGHT_MARGIN) / canvasConfig.height
+      ))
     : PIXELS_PER_UNIT;
   const scale = baseScale * canvasZoom;
   const displayWidth = Math.round(canvasConfig.width * scale);
@@ -219,13 +322,25 @@ function App() {
 
   const [showCode, setShowCode] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
-  const [showLeftPanel, setShowLeftPanel] = useState(false);
-  const [showRightPanel, setShowRightPanel] = useState(false);
-  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
-  const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoValues, setDemoValues] = useState<Record<string, string>>({});
+  const [demoEditingInputId, setDemoEditingInputId] = useState<string | null>(null);
+  const [demoInputOverlayRect, setDemoInputOverlayRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const demoInputRef = useRef<HTMLInputElement>(null);
+  const [showLeftPanel, setShowLeftPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
+  const [showRightPanel, setShowRightPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
+  const prevIsMobileRef = useRef(isMobile);
+  useEffect(() => {
+    if (prevIsMobileRef.current !== isMobile) {
+      prevIsMobileRef.current = isMobile;
+      setShowLeftPanel(!isMobile);
+      setShowRightPanel(!isMobile);
+    }
+  }, [isMobile]);
   const [gridVisible, setGridVisible] = useState(true);
   const [customProportionSelected, setCustomProportionSelected] = useState(false);
   const [lastCustomRatioString, setLastCustomRatioString] = useState<string | null>(null);
+  const stageRef = useRef<Konva.Stage>(null);
 
   const RATIOS = { pc: [16, 9] as const, tablet: [4, 3] as const, mobile: [9, 16] as const };
   const proportionValue = (() => {
@@ -353,6 +468,82 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  const enterDemoMode = () => {
+    const initial: Record<string, string> = {};
+    widgets.forEach((w) => {
+      if (w.type === 'button' || w.type === 'switch' || w.type === 'led') {
+        initial[w.id] = w.text === '1' ? '1' : '0';
+      } else if (w.type === 'slider') {
+        const raw = w.text ?? '0';
+        initial[w.id] = String(Math.min(100, Math.max(0, parseFloat(raw) || 0)));
+      } else if (w.type === 'input') {
+        initial[w.id] = w.text ?? '';
+      }
+    });
+    setDemoValues(initial);
+    setDemoMode(true);
+    selectWidget(null);
+  };
+
+  const exitDemoMode = () => {
+    setDemoMode(false);
+    setDemoValues({});
+    setDemoEditingInputId(null);
+  };
+
+  const handleDemoInputFocus = useCallback((id: string) => {
+    setDemoEditingInputId(id);
+  }, []);
+
+  const handleDemoInputChange = useCallback((id: string, value: string) => {
+    setDemoValues((prev) => ({ ...prev, [id]: value }));
+  }, []);
+
+  const handleDemoInputBlur = useCallback(() => {
+    setDemoEditingInputId(null);
+    setDemoInputOverlayRect(null);
+  }, []);
+
+  useEffect(() => {
+    if (!demoMode || !demoEditingInputId || !stageRef.current) {
+      setDemoInputOverlayRect(null);
+      return;
+    }
+    const w = widgets.find((x) => x.id === demoEditingInputId);
+    if (!w) {
+      setDemoInputOverlayRect(null);
+      return;
+    }
+    const container = stageRef.current.container();
+    const r = container.getBoundingClientRect();
+    setDemoInputOverlayRect({
+      left: r.left + w.x * scale,
+      top: r.top + w.y * scale,
+      width: Math.max(40, w.width * scale),
+      height: Math.max(24, w.height * scale),
+    });
+  }, [demoMode, demoEditingInputId, widgets, scale]);
+
+  useEffect(() => {
+    if (demoInputOverlayRect) {
+      const t = requestAnimationFrame(() => {
+        demoInputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(t);
+    }
+  }, [demoInputOverlayRect]);
+
+  const handleDemoClick = useCallback((id: string) => {
+    setDemoValues((prev) => {
+      const cur = prev[id] ?? '0';
+      return { ...prev, [id]: cur === '1' ? '0' : '1' };
+    });
+  }, []);
+
+  const handleDemoSliderChange = useCallback((id: string, value: number) => {
+    setDemoValues((prev) => ({ ...prev, [id]: String(value) }));
+  }, []);
+
   const handleGenerateUbiBlock = () => {
     const parserApi = window as any;
     if (
@@ -433,15 +624,28 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedId, removeWidget, copyWidget, pasteWidget, moveSelectedWidget]);
 
+  useEffect(() => {
+    const stopDragOutside = () => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const visit = (node: Konva.Node) => {
+        if (node.isDragging && node.isDragging()) node.stopDrag();
+        const container = node as Konva.Container;
+        if (container.getChildren) container.getChildren().forEach((child: Konva.Node) => visit(child));
+      };
+      (stage as Konva.Container).getChildren().forEach((child: Konva.Node) => visit(child));
+    };
+    window.addEventListener('mouseup', stopDragOutside);
+    return () => window.removeEventListener('mouseup', stopDragOutside);
+  }, []);
+
   return (
-    <div className="App app-root">
-      {!leftPanelVisible && (
-        <button type="button" className="panel-restore panel-restore-left" onClick={() => setLeftPanelVisible(true)} title="Показать панель виджетов">◀</button>
-      )}
-      <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'} ${!leftPanelVisible ? 'sidebar-collapsed' : ''}`}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+    <div className={`App app-root ${demoMode ? 'demo-mode' : ''}`}>
+      {!demoMode && (
+      <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
+        <button className="mobile-sidebar-close" onClick={() => setShowLeftPanel(false)}>×</button>
+        <div style={{ marginBottom: '8px', paddingRight: '44px', paddingLeft: '44px' }}>
           <h3 style={{ marginTop: 0, marginBottom: 0 }}>Widgets</h3>
-          <button type="button" className="panel-hide-btn" onClick={() => { setLeftPanelVisible(false); setShowLeftPanel(false); }} title="Скрыть панель">◀</button>
         </div>
         <button className="widget-button" onClick={() => addWidget('button')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>
           <span className="widget-icon">🔘</span><span>Add Button</span>
@@ -479,9 +683,26 @@ function App() {
             setCustomProportionSelected(false);
             setLastCustomRatioString(null);
             const [rW, rH] = (v === 'pc' || v === 'tablet' || v === 'mobile') ? RATIOS[v] : [16, 9];
-            const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
-            const newWidth = rW >= rH ? maxCurrent : Math.round(maxCurrent * rW / rH);
-            const newHeight = rW >= rH ? Math.round(maxCurrent * rH / rW) : maxCurrent;
+            let newWidth: number;
+            let newHeight: number;
+            if (v === 'mobile') {
+              // Мобильный (9:16): уменьшенные логические размеры, чтобы при 100% помещалось в экран
+              const MOBILE_FIT_FACTOR = 0.85; // запас по краям
+              const maxW = (viewportW - 24) * MOBILE_FIT_FACTOR;
+              const maxH = Math.max(20, (viewportH - VIEWPORT_HEIGHT_MARGIN) * MOBILE_FIT_FACTOR);
+              const widthIfLimitByH = (maxH * rW) / rH;
+              if (widthIfLimitByH <= maxW) {
+                newHeight = snapToGrid(Math.round(maxH));
+                newWidth = snapToGrid(Math.round((newHeight * rW) / rH));
+              } else {
+                newWidth = snapToGrid(Math.round(maxW));
+                newHeight = snapToGrid(Math.round((newWidth * rH) / rW));
+              }
+            } else {
+              const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
+              newWidth = rW >= rH ? maxCurrent : Math.round(maxCurrent * rW / rH);
+              newHeight = rW >= rH ? Math.round(maxCurrent * rH / rW) : maxCurrent;
+            }
             updateCanvas({ width: newWidth, height: newHeight });
           }}
           style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
@@ -526,14 +747,32 @@ function App() {
         />
         <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', cursor: 'pointer', backgroundColor: '#000', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}>Generate Code</button>
       </div>
+      )}
 
-      <div className="canvas-container">
+      <div
+        className="canvas-container"
+        style={{
+          marginLeft: demoMode ? 0 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0),
+          marginRight: demoMode ? 0 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0),
+          transition: 'margin 0.2s ease',
+        }}
+      >
         <div className="tabs-bar">
           <select className="tabs-select" value={activeTabId} onChange={(e) => setActiveTab(e.target.value)}>
             {tabs.map((tab) => (
               <option key={tab.id} value={tab.id}>{tab.name}</option>
             ))}
           </select>
+          {demoMode ? (
+            <button
+              type="button"
+              className="tab-demo-exit tab-rename-button"
+              onClick={exitDemoMode}
+            >
+              Выйти из демо
+            </button>
+          ) : (
+            <>
           <button className="tab-add-button" onClick={addTab}>+</button>
           <button
             className="tab-rename-button"
@@ -577,9 +816,23 @@ function App() {
               +
             </button>
           </span>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={enterDemoMode}
+            title="Режим демонстрации"
+          >
+            Демо
+          </button>
+            </>
+          )}
         </div>
+        {!demoMode && (
+          <>
         <button className="mobile-toggle mobile-toggle-left" onClick={() => setShowLeftPanel((prev) => !prev)}>☰</button>
         <button className="mobile-toggle mobile-toggle-right" onClick={() => setShowRightPanel((prev) => !prev)}>⚙</button>
+          </>
+        )}
 
         <div style={{ width: displayWidth, flexShrink: 0 }}>
           <div
@@ -590,14 +843,17 @@ function App() {
               minWidth: displayWidth,
               minHeight: displayHeight,
               backgroundColor: previewCanvasColor ?? canvasConfig.color,
-              border: '1px solid #94a3b8',
+              border: '3px solid #475569',
+              borderStyle: 'solid',
               boxSizing: 'border-box',
+              boxShadow: '0 0 0 1px #334155, 0 8px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08)',
+              borderRadius: '6px',
             }}
           >
-            <Stage width={displayWidth} height={displayHeight} onMouseDown={(e: any) => { if (e.target === e.target.getStage()) selectWidget(null); }}>
+            <Stage ref={stageRef} width={displayWidth} height={displayHeight} onMouseDown={(e: any) => { if (!demoMode && e.target === e.target.getStage()) selectWidget(null); }}>
               <Layer>
                 <Group scaleX={scale} scaleY={scale}>
-                  {gridVisible && (
+                  {gridVisible && !demoMode && (
                     <>
                       {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
                         <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
@@ -611,10 +867,15 @@ function App() {
                     <WidgetComponent
                       key={w.id}
                       shapeProps={w.id === selectedId && previewWidgetColor != null ? { ...w, color: previewWidgetColor } : w}
-                      isSelected={w.id === selectedId}
+                      isSelected={!demoMode && w.id === selectedId}
                       onSelect={() => selectWidget(w.id)}
                       onChange={(attrs: any) => updateWidget(w.id, attrs)}
                       canvasBgColor={previewCanvasColor ?? canvasConfig.color}
+                      isDemoMode={demoMode}
+                      demoDisplayValue={demoValues[w.id]}
+                      onDemoClick={demoMode ? handleDemoClick : undefined}
+                      onDemoSliderChange={demoMode ? handleDemoSliderChange : undefined}
+                      onDemoInputFocus={demoMode ? handleDemoInputFocus : undefined}
                     />
                   ))}
                 </Group>
@@ -624,14 +885,38 @@ function App() {
         </div>
       </div>
 
-      {!rightPanelVisible && (
-        <button type="button" className="panel-restore panel-restore-right" onClick={() => setRightPanelVisible(true)} title="Показать панель свойств">▶</button>
+      {demoMode && demoEditingInputId && demoInputOverlayRect && (
+        <input
+          ref={demoInputRef}
+          type="text"
+          value={demoValues[demoEditingInputId] ?? widgets.find((w) => w.id === demoEditingInputId)?.text ?? ''}
+          onChange={(e) => handleDemoInputChange(demoEditingInputId, e.target.value)}
+          onBlur={handleDemoInputBlur}
+          onKeyDown={(e) => { if (e.key === 'Escape') { (e.target as HTMLInputElement).blur(); } }}
+          style={{
+            position: 'fixed',
+            left: demoInputOverlayRect.left,
+            top: demoInputOverlayRect.top,
+            width: demoInputOverlayRect.width,
+            height: demoInputOverlayRect.height,
+            margin: 0,
+            padding: '2px 6px',
+            border: '2px solid #0ea5e9',
+            borderRadius: 4,
+            fontSize: 14,
+            boxSizing: 'border-box',
+            zIndex: 100,
+          }}
+          data-demo-input
+        />
       )}
-      <div className={`sidebar sidebar-right ${showRightPanel ? 'mobile-open' : 'mobile-closed'} ${!rightPanelVisible ? 'sidebar-collapsed' : ''}`}>
+
+      {!demoMode && (
+      <div className={`sidebar sidebar-right ${showRightPanel ? 'mobile-open' : 'mobile-closed'}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowRightPanel(false)}>×</button>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <div className="sidebar-right-content">
+        <div style={{ marginBottom: '8px', paddingRight: '44px' }}>
           <h3 style={{ marginTop: 0, marginBottom: 0 }}>Properties</h3>
-          <button type="button" className="panel-hide-btn" onClick={() => { setRightPanelVisible(false); setShowRightPanel(false); }} title="Скрыть панель">▶</button>
         </div>
         {selectedId ? (
           <div>
@@ -763,24 +1048,50 @@ function App() {
                       />
                     </>
                   )}
-                  <>
-                    <label style={{ fontSize: '12px' }}>Подпись над виджетом:</label>
-                    <input
-                      type="text"
-                      value={selectedWidget.caption ?? ''}
-                      onChange={(e) => updateWidget(selectedId, { caption: e.target.value })}
-                      style={{ width: '100%', marginBottom: '10px' }}
-                      placeholder="Текст над виджетом"
-                    />
-                  </>
-                  <label style={{ fontSize: '12px' }}>Variable Name:</label>
-                  <input
-                    type="text"
-                    value={selectedWidget.varName || ''}
-                    onChange={(e) => updateWidget(selectedId, { varName: e.target.value.replace(/[^a-zA-Z0-9_\u0400-\u04FF]/g, '') })}
-                    style={{ width: '100%', marginBottom: '10px' }}
-                  />
-                  {!isBoolLocked && (
+                  {selectedWidget.type === 'label' && (
+                    <>
+                      <label style={{ fontSize: '12px' }}>Текст подписи:</label>
+                      <input
+                        type="text"
+                        value={selectedWidget.text ?? ''}
+                        onChange={(e) => updateWidget(selectedId, { text: e.target.value })}
+                        style={{ width: '100%', marginBottom: '10px' }}
+                        placeholder="Текст Label"
+                      />
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '12px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedWidget.varType === 'none'}
+                          onChange={(e) => updateWidget(selectedId, { varType: e.target.checked ? 'none' : 'String' })}
+                        />
+                        Просто надпись
+                      </label>
+                    </>
+                  )}
+                  {!((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
+                    <>
+                      <label style={{ fontSize: '12px' }}>Подпись над виджетом:</label>
+                      <input
+                        type="text"
+                        value={selectedWidget.caption ?? ''}
+                        onChange={(e) => updateWidget(selectedId, { caption: e.target.value })}
+                        style={{ width: '100%', marginBottom: '10px' }}
+                        placeholder="Текст над виджетом"
+                      />
+                    </>
+                  )}
+                  {!((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
+                    <>
+                      <label style={{ fontSize: '12px' }}>Variable Name:</label>
+                      <input
+                        type="text"
+                        value={selectedWidget.varName || ''}
+                        onChange={(e) => updateWidget(selectedId, { varName: e.target.value.replace(/[^a-zA-Z0-9_\u0400-\u04FF]/g, '') })}
+                        style={{ width: '100%', marginBottom: '10px' }}
+                      />
+                    </>
+                  )}
+                  {!isBoolLocked && !((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
                     <>
                       <label style={{ fontSize: '12px' }}>Type:</label>
                       <select
@@ -815,7 +1126,22 @@ function App() {
             <button onClick={() => removeWidget(selectedId)} style={{ width: '100%', padding: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Delete</button>
           </div>
         ) : <p>Select a widget</p>}
+        </div>
+        <div className="sidebar-right-footer">
+          <button
+            onClick={() => {
+              if (window.confirm('Очистить все виджеты на этой вкладке? Это действие нельзя отменить.')) {
+                setWidgets(widgets.filter((w) => (w.tabId || 'tab_1') !== activeTabId));
+                selectWidget(null);
+              }
+            }}
+            style={{ width: '100%', padding: '10px', backgroundColor: '#6b7280', color: 'white', border: 'none', borderRadius: '4px', fontSize: '13px', cursor: 'pointer' }}
+          >
+            Очистить интерфейс
+          </button>
+        </div>
       </div>
+      )}
 
       {showCode && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>

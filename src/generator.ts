@@ -7,14 +7,17 @@ const escapeCppString = (value: string): string =>
     .replace(/\n/g, '\\n');
 
 export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
-  const usedWidgets = widgets.filter((w) => w.varType !== 'none');
-  const widgetsWithVars = usedWidgets;
-
-  const tabIds = Array.from(
-    new Set(usedWidgets.map((w) => w.tabId ?? 'tab_1')),
+  const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
+  // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
+  const configWidgets = widgets.filter(
+    (w) => w.varType !== 'none' || w.type === 'label',
   );
 
-  const compactWidgets = usedWidgets.map((w) => {
+  const tabIds = Array.from(
+    new Set(configWidgets.map((w) => w.tabId ?? 'tab_1')),
+  );
+
+  const compactWidgets = configWidgets.map((w) => {
     const tabId = w.tabId ?? 'tab_1';
     const tabIndex = Math.max(0, tabIds.indexOf(tabId));
     const typeCode =
@@ -44,7 +47,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
       w.text ?? '',
       tabIndex,
     ];
-    if (w.varName && w.varName !== w.id) {
+    if (w.varType !== 'none' && w.varName && w.varName !== w.id) {
       base.push(w.varName);
     }
     return base;
@@ -52,7 +55,8 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
 
   const configJson = JSON.stringify([tabIds, compactWidgets]);
 
-  const isBidirectional = (w: Widget) => w.type === 'switch' || w.type === 'slider' || w.type === 'input';
+  const isBidirectional = (w: Widget) =>
+    w.type === 'switch' || w.type === 'slider' || w.type === 'input';
 
   const globalVars = widgetsWithVars
     .map((w) => {
@@ -69,25 +73,29 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
 
   const setHandlers = widgetsWithVars
     .map((w) => {
-      const targetVar = isBidirectional(w) ? `${w.varName}_out` : w.varName;
+      const isBidi = isBidirectional(w);
+      const targetVar = isBidi ? `${w.varName}_out` : w.varName;
       let assign: string;
       if (w.varType === 'int') {
-        assign = `${targetVar} = varVal.toInt();`;
+        assign = `${targetVar} = varVal.toInt()`;
       } else if (w.varType === 'float') {
-        assign = `${targetVar} = varVal.toFloat();`;
+        assign = `${targetVar} = varVal.toFloat()`;
       } else if (w.varType === 'bool') {
-        assign = `${targetVar} = (varVal == "1" || varVal == "true");`;
+        assign = `${targetVar} = (varVal == "1" || varVal == "true")`;
       } else {
-        assign = `${targetVar} = varVal;`;
+        assign = `${targetVar} = varVal`;
       }
-      const setVarName = isBidirectional(w) ? `${w.varName}_out` : w.varName;
+      const setVarName = isBidi ? `${w.varName}_out` : w.varName;
+      const extraLine = isBidi ? `\n    ${w.varName}_in = ${w.varName}_out;` : '';
       return `  else if (varName == "${escapeCppString(setVarName)}") {
-    ${assign}
+    ${assign};${extraLine}
   }`;
     })
     .join('\n');
 
-  const hasSoundEnabledWidget = widgetsWithVars.some((w) => w.varName === 'sound_enabled');
+  const hasSoundEnabledWidget = widgetsWithVars.some(
+    (w) => w.varName === 'sound_enabled',
+  );
   const stateEntriesList: string[] = [];
   widgetsWithVars.forEach((w) => {
     const keyBeg = stateEntriesList.length === 0 ? '{\\"' : ',\\"';
