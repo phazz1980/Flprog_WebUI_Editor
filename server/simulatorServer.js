@@ -167,41 +167,62 @@ function handleLoad(body, res) {
   res.end(JSON.stringify({ ok: true, message: 'Project loaded' }));
 }
 
+/** State: для slider/switch/input — два слота подряд (_out, _in), ответ через вторую переменную. */
 function getStateArray() {
   if (!project) return null;
   const { state, widgetsWithVars, hasSoundEnabledWidget } = project;
   const out = [];
   widgetsWithVars.forEach((w) => {
-    const key = w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
-    out.push(state[key]);
+    if (isBidirectional(w)) {
+      out.push(state[`${w.varName}_out`]);
+      out.push(state[`${w.varName}_in`]);
+    } else {
+      const key = w.varName === 'sound_enabled' ? 'sound_enabled_in' : w.varName;
+      out.push(state[key]);
+    }
   });
   if (!hasSoundEnabledWidget) out.push(state.sound_enabled);
   out.push(state.ui_message);
   return out;
 }
 
+/** State short: для slider/switch/input — два ключа подряд (_out, _in). */
 function getStateShort() {
   if (!project) return null;
   const { state, widgetsWithVars, hasSoundEnabledWidget } = project;
   const out = {};
-  widgetsWithVars.forEach((w, i) => {
-    const key = w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
-    out[String(i)] = state[key];
+  let keyIndex = 0;
+  widgetsWithVars.forEach((w) => {
+    if (isBidirectional(w)) {
+      out[String(keyIndex)] = state[`${w.varName}_out`];
+      keyIndex += 1;
+      out[String(keyIndex)] = state[`${w.varName}_in`];
+      keyIndex += 1;
+    } else {
+      const key = w.varName === 'sound_enabled' ? 'sound_enabled_in' : w.varName;
+      out[String(keyIndex)] = state[key];
+      keyIndex += 1;
+    }
   });
   if (!hasSoundEnabledWidget) out.s = state.sound_enabled;
   out.m = state.ui_message;
   return out;
 }
 
-/** Список переменных в порядке state: [{ name, type, setKey }, ...] для таблицы (setKey — имя для /set) */
+/** Список переменных в порядке state (один элемент = один слот в state); для bidi — два слота: _out, _in. setKey для /set. */
 function getVarsList() {
   if (!project) return null;
   const { widgetsWithVars, hasSoundEnabledWidget } = project;
   const out = [];
   widgetsWithVars.forEach((w) => {
-    const displayName = w.varName === 'sound_enabled' ? 'sound_enabled' : (isBidirectional(w) ? `${w.varName}_in` : w.varName);
     const setKey = isBidirectional(w) ? `${w.varName}_out` : w.varName;
-    out.push({ name: displayName, type: w.varType, setKey });
+    if (isBidirectional(w)) {
+      out.push({ name: `${w.varName}_out`, type: w.varType, setKey });
+      out.push({ name: `${w.varName}_in`, type: w.varType, setKey });
+    } else {
+      const displayName = w.varName === 'sound_enabled' ? 'sound_enabled' : w.varName;
+      out.push({ name: displayName, type: w.varType, setKey });
+    }
   });
   if (!hasSoundEnabledWidget) out.push({ name: 'sound_enabled', type: 'bool', setKey: 'sound_enabled' });
   out.push({ name: 'ui_message', type: 'String', setKey: 'ui_message' });

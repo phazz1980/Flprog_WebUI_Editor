@@ -24,9 +24,11 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:with-viewer": "npm run build && node scripts/build-viewer-into-build.js",
     "test": "react-scripts test",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build",
+    "deploy:with-viewer": "npm run build:with-viewer && gh-pages -d build",
     "simulator": "node server/simulatorServer.js"
   },
   "browserslist": {

@@ -42,7 +42,8 @@ export function parseConfig(raw: unknown): { tabIds: string[]; widgets: RuntimeW
 
     const hasVariable = type !== 'rect';
     const stateIdx = hasVariable ? stateIndex : -1;
-    if (hasVariable) stateIndex += 1;
+    const isBidi = type === 'slider' || type === 'switch' || type === 'input';
+    if (hasVariable) stateIndex += isBidi ? 2 : 1;
 
     widgets.push({
       id,
@@ -57,6 +58,7 @@ export function parseConfig(raw: unknown): { tabIds: string[]; widgets: RuntimeW
       tabIndex,
       varName,
       stateIndex: stateIdx,
+      ...(isBidi ? { responseStateIndex: stateIdx + 1 } : {}),
     });
   }
 

@@ -13,8 +13,10 @@ export interface RuntimeWidget {
   tabId: string;
   tabIndex: number;
   varName: string; // id или [9] из compactWidgets
-  /** Индекс среди виджетов с переменной (для state[]) */
+  /** Индекс среди виджетов с переменной (для state[]); для slider/switch — индекс первой переменной (_out) */
   stateIndex: number;
+  /** Для slider/switch — индекс второй переменной (_in), ответ с МК; для отображения и подтверждения */
+  responseStateIndex?: number;
 }
 
 export interface CanvasConfig {

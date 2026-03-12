@@ -86,7 +86,7 @@ function ViewerWidget({
   widget: RuntimeWidget;
   displayText: string;
   canvasBgColor: string;
-  onSetVar?: (varName: string, value: string) => void;
+  onSetVar?: (varName: string, value: string, opts?: { widgetId: string; previousValue: string }) => void;
 }) {
   const shapeRef = useRef<Konva.Group>(null);
   const lw = widget.width;
@@ -114,8 +114,12 @@ function ViewerWidget({
     const now = Date.now();
     if (lastSetVarRef.current?.key === key && now - lastSetVarRef.current.at < CLICK_DEBOUNCE_MS) return;
     lastSetVarRef.current = { key, at: now };
-    onSetVar(varNameForSet, next);
-  }, [widget.type, displayText, onSetVar, varNameForSet]);
+    if (widget.type === 'switch') {
+      onSetVar(varNameForSet, next, { widgetId: widget.id, previousValue: displayText });
+    } else {
+      onSetVar(varNameForSet, next);
+    }
+  }, [widget.type, widget.id, displayText, onSetVar, varNameForSet]);
 
   const isClickable = widget.type === 'button' || widget.type === 'switch';
 
@@ -271,9 +275,14 @@ function App() {
   const [draggingSliderId, setDraggingSliderId] = useState<string | null>(null);
   const [localSliderValues, setLocalSliderValues] = useState<Record<string, number>>({});
   const [sliderRevertOverrides, setSliderRevertOverrides] = useState<Record<string, string>>({});
-  const pendingSliderRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
+  const pendingSliderRef = useRef<{ id: string; value: string; previousValue: string; varNameOut: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
   const sliderDragStartRef = useRef<{ previousValue: string } | null>(null);
   const SLIDER_RESPONSE_WAIT_MS = 1000;
+
+  const [switchDisplayOverrides, setSwitchDisplayOverrides] = useState<Record<string, string>>({});
+  const [switchRevertOverrides, setSwitchRevertOverrides] = useState<Record<string, string>>({});
+  const pendingSwitchRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
+  const SWITCH_RESPONSE_WAIT_MS = 1000;
 
   const connect = useCallback(async () => {
     setError(null);
@@ -345,6 +354,34 @@ function App() {
     }
   }, []);
 
+  type SetVarOpts = { widgetId: string; previousValue: string };
+  const handleSetVar = useCallback((varName: string, value: string, opts?: SetVarOpts) => {
+    if (opts?.widgetId != null) {
+      setSwitchDisplayOverrides((prev) => ({ ...prev, [opts!.widgetId]: value }));
+      setVar(varName, value);
+      if (pendingSwitchRef.current) {
+        clearTimeout(pendingSwitchRef.current.timeoutId);
+        pendingSwitchRef.current = null;
+      }
+      const timeoutId = setTimeout(() => {
+        if (pendingSwitchRef.current?.id === opts!.widgetId) {
+          const prevVal = pendingSwitchRef.current.previousValue;
+          pendingSwitchRef.current = null;
+          setVar(varName, prevVal);
+          setSwitchRevertOverrides((prev) => ({ ...prev, [opts!.widgetId]: prevVal }));
+          setSwitchDisplayOverrides((prev) => {
+            const next = { ...prev };
+            delete next[opts!.widgetId];
+            return next;
+          });
+        }
+      }, SWITCH_RESPONSE_WAIT_MS);
+      pendingSwitchRef.current = { id: opts.widgetId, value, previousValue: opts.previousValue, timeoutId };
+    } else {
+      setVar(varName, value);
+    }
+  }, [setVar]);
+
   const activeTabId = tabIds[activeTabIndex] ?? tabIds[0];
   const visibleWidgets = widgets.filter((w) => w.tabId === activeTabId);
 
@@ -394,7 +431,8 @@ function App() {
           logicalY < w.y + w.height
       );
       if (hitSlider && connected) {
-        const previousValue = displayValue(hitSlider, getStateValueByIndex(state, hitSlider.stateIndex), hitSlider.text ?? '');
+        const sliderStateIdx = hitSlider.responseStateIndex ?? hitSlider.stateIndex;
+        const previousValue = displayValue(hitSlider, getStateValueByIndex(state, sliderStateIdx), hitSlider.text ?? '');
         sliderDragStartRef.current = { previousValue };
         setDraggingSliderId(hitSlider.id);
         const lw = hitSlider.width;
@@ -417,16 +455,15 @@ function App() {
       const pos = stage.getPointerPosition();
       if (!pos) return;
       const logicalX = pos.x / scale;
-      const logicalY = pos.y / scale;
       const w = visibleWidgets.find((x) => x.type === 'slider' && x.id === draggingSliderId);
       if (!w) return;
-      if (logicalX < w.x || logicalX >= w.x + w.width || logicalY < w.y || logicalY >= w.y + w.height) return;
       const lw = w.width;
       const lh = w.height;
       const thumbRadius = Math.min(lh / 2 - 2, 8);
       const trackWidth = lw - 2 * thumbRadius;
       const localX = logicalX - w.x;
-      const value = Math.min(100, Math.max(0, ((localX - thumbRadius) / trackWidth) * 100));
+      const localXClamped = Math.max(thumbRadius, Math.min(thumbRadius + trackWidth, localX));
+      const value = Math.min(100, Math.max(0, ((localXClamped - thumbRadius) / trackWidth) * 100));
       setLocalSliderValues((prev) => ({ ...prev, [w.id]: value }));
     },
     [draggingSliderId, scale, visibleWidgets]
@@ -450,10 +487,13 @@ function App() {
       clearTimeout(pendingSliderRef.current.timeoutId);
       pendingSliderRef.current = null;
     }
+    const varNameOut = `${w?.varName ?? id}_out`;
     const timeoutId = setTimeout(() => {
       if (pendingSliderRef.current?.id === id) {
         const prevVal = pendingSliderRef.current.previousValue;
+        const nameOut = pendingSliderRef.current.varNameOut;
         pendingSliderRef.current = null;
+        setVar(nameOut, prevVal);
         setSliderRevertOverrides((prev) => ({ ...prev, [id]: prevVal }));
         setLocalSliderValues((prev) => {
           const next = { ...prev };
@@ -462,7 +502,7 @@ function App() {
         });
       }
     }, SLIDER_RESPONSE_WAIT_MS);
-    pendingSliderRef.current = { id, value: valueStr, previousValue, timeoutId };
+    pendingSliderRef.current = { id, value: valueStr, previousValue, varNameOut, timeoutId };
   }, [draggingSliderId, connected, setVar, widgets, localSliderValues]);
 
   useEffect(() => {
@@ -470,7 +510,8 @@ function App() {
     const { id, value } = pendingSliderRef.current;
     const w = widgets.find((x) => x.id === id);
     if (!w || w.stateIndex < 0) return;
-    const raw = getStateValueByIndex(state, w.stateIndex);
+    const responseIdx = w.responseStateIndex ?? w.stateIndex;
+    const raw = getStateValueByIndex(state, responseIdx);
     const currentStr = raw === undefined ? '' : String(typeof raw === 'number' ? Math.round(raw) : raw);
     if (currentStr === value) {
       clearTimeout(pendingSliderRef.current.timeoutId);
@@ -481,6 +522,39 @@ function App() {
         return next;
       });
       setLocalSliderValues((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  }, [state, widgets]);
+
+  useEffect(() => {
+    if (!pendingSwitchRef.current) return;
+    const { id, value } = pendingSwitchRef.current;
+    const w = widgets.find((x) => x.id === id);
+    if (!w || w.stateIndex < 0) return;
+    const responseIdx = w.responseStateIndex ?? w.stateIndex;
+    const raw = getStateValueByIndex(state, responseIdx);
+    const currentStr =
+      raw === undefined
+        ? ''
+        : typeof raw === 'boolean'
+          ? raw ? '1' : '0'
+          : typeof raw === 'number'
+            ? raw !== 0 ? '1' : '0'
+            : String(raw).toLowerCase() === 'true' || String(raw) === '1'
+              ? '1'
+              : '0';
+    if (currentStr === value) {
+      clearTimeout(pendingSwitchRef.current.timeoutId);
+      pendingSwitchRef.current = null;
+      setSwitchRevertOverrides((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setSwitchDisplayOverrides((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
@@ -700,11 +774,15 @@ function App() {
               <Layer listening={true}>
                 <Group scaleX={scale} scaleY={scale} listening={true}>
                   {visibleWidgets.map((w) => {
-                    const rawVal = w.stateIndex >= 0 ? getStateValueByIndex(state, w.stateIndex) : undefined;
+                    const stateIdx = w.stateIndex >= 0 ? (w.responseStateIndex ?? w.stateIndex) : -1;
+                    const rawVal = stateIdx >= 0 ? getStateValueByIndex(state, stateIdx) : undefined;
                     let displayText = displayValue(w, rawVal, w.text ?? '');
                     if (w.type === 'slider') {
                       if (localSliderValues[w.id] !== undefined) displayText = String(Math.round(localSliderValues[w.id]));
                       else if (sliderRevertOverrides[w.id] !== undefined) displayText = sliderRevertOverrides[w.id];
+                    } else if (w.type === 'switch') {
+                      if (switchDisplayOverrides[w.id] !== undefined) displayText = switchDisplayOverrides[w.id];
+                      else if (switchRevertOverrides[w.id] !== undefined) displayText = switchRevertOverrides[w.id];
                     }
                     return (
                       <ViewerWidget
@@ -712,7 +790,7 @@ function App() {
                         widget={w}
                         displayText={displayText}
                         canvasBgColor={canvasColor}
-                        onSetVar={connected ? setVar : undefined}
+                        onSetVar={connected ? handleSetVar : undefined}
                       />
                     );
                   })}

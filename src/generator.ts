@@ -102,18 +102,28 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     (w) => w.varName === 'sound_enabled',
   );
 
-  // Порядок state: виджеты с переменными (как в config), затем sound_enabled (если нет в виджетах), затем ui_message.
+  // Порядок state: виджеты с переменными (как в config); для slider/switch — два слота: _out, _in (ответ через вторую переменную).
   // Вариант 1: массив по индексам [v0,v1,...,s,"m"]
   const stateArrayParts: string[] = [];
   widgetsWithVars.forEach((w) => {
+    const isBidi = isBidirectional(w);
     const valueVar =
-      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
-    if (w.varType === 'bool') {
-      stateArrayParts.push(`  server->print(${valueVar} ? 1 : 0);`);
-    } else if (w.varType === 'int' || w.varType === 'float') {
-      stateArrayParts.push(`  server->print(${valueVar});`);
+      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidi ? `${w.varName}_in` : w.varName;
+    const outVar = isBidi ? `${w.varName}_out` : null;
+    const printOne = (varName: string) => {
+      if (w.varType === 'bool') {
+        stateArrayParts.push(`  server->print(${varName} ? 1 : 0);`);
+      } else if (w.varType === 'int' || w.varType === 'float') {
+        stateArrayParts.push(`  server->print(${varName});`);
+      } else {
+        stateArrayParts.push(`  server->print("\\""); server->print(${varName}); server->print("\\"");`);
+      }
+    };
+    if (isBidi) {
+      printOne(outVar!);
+      printOne(valueVar);
     } else {
-      stateArrayParts.push(`  server->print("\\""); server->print(${valueVar}); server->print("\\"");`);
+      printOne(valueVar);
     }
   });
   if (!hasSoundEnabledWidget) {
@@ -121,21 +131,31 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
   }
   stateArrayParts.push('  server->print("\\""); server->print(ui_message); server->print("\\"");');
 
-  // Вариант 2: короткие ключи "0":v,"1":v,...,"s":bool,"m":str
+  // Вариант 2: короткие ключи "0":v,"1":v,...,"s":bool,"m":str (для slider/switch — два ключа: _out, _in)
   const stateShortKeyParts: string[] = [];
   let keyIndex = 0;
   widgetsWithVars.forEach((w) => {
-    const key = String(keyIndex);
-    keyIndex += 1;
+    const isBidi = isBidirectional(w);
     const valueVar =
-      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
-    const keyPart = keyIndex === 1 ? `{\\"${key}\\":` : `,\\"${key}\\":`;
-    if (w.varType === 'bool') {
-      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${valueVar} ? 1 : 0);`);
-    } else if (w.varType === 'int' || w.varType === 'float') {
-      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${valueVar});`);
+      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidi ? `${w.varName}_in` : w.varName;
+    const outVar = isBidi ? `${w.varName}_out` : null;
+    const pushKey = (varName: string) => {
+      const key = String(keyIndex);
+      keyIndex += 1;
+      const keyPart = keyIndex === 1 ? `{\\"${key}\\":` : `,\\"${key}\\":`;
+      if (w.varType === 'bool') {
+        stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${varName} ? 1 : 0);`);
+      } else if (w.varType === 'int' || w.varType === 'float') {
+        stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${varName});`);
+      } else {
+        stateShortKeyParts.push(`  server->print("${keyPart}"); server->print("\\""); server->print(${varName}); server->print("\\"");`);
+      }
+    };
+    if (isBidi) {
+      pushKey(outVar!);
+      pushKey(valueVar);
     } else {
-      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print("\\""); server->print(${valueVar}); server->print("\\"");`);
+      pushKey(valueVar);
     }
   });
   if (!hasSoundEnabledWidget) {
