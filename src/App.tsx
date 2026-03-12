@@ -322,6 +322,10 @@ function App() {
 
   const [showCode, setShowCode] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
+  const SIMULATOR_URL = 'http://localhost:31337';
+  const [simulatorLoading, setSimulatorLoading] = useState(false);
+  const [simulatorError, setSimulatorError] = useState<string | null>(null);
+  const [simulatorSuccess, setSimulatorSuccess] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [demoValues, setDemoValues] = useState<Record<string, string>>({});
   const [demoEditingInputId, setDemoEditingInputId] = useState<string | null>(null);
@@ -467,6 +471,28 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const sendToSimulator = useCallback(async () => {
+    setSimulatorError(null);
+    setSimulatorSuccess(false);
+    setSimulatorLoading(true);
+    try {
+      const res = await fetch(`${SIMULATOR_URL}/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ widgets, canvasConfig }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setSimulatorSuccess(true);
+    } catch (e: any) {
+      setSimulatorError(e?.message || 'Не удалось подключиться к симулятору. Запустите: npm run simulator');
+    } finally {
+      setSimulatorLoading(false);
+    }
+  }, [widgets, canvasConfig]);
 
   const enterDemoMode = () => {
     const initial: Record<string, string> = {};
@@ -1151,7 +1177,7 @@ function App() {
               <button onClick={() => setShowCode(false)}>Close</button>
             </div>
             <textarea readOnly value={generateArduinoCode(widgets, canvasConfig)} style={{ flex: 1, fontFamily: 'monospace' }} />
-            <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
+            <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Download .ino</button>
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
@@ -1170,6 +1196,27 @@ function App() {
               >
                 Copy
               </button>
+            </div>
+            <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+              <div style={{ fontWeight: 600, marginBottom: '6px' }}>Симулятор ESP</div>
+              <p style={{ fontSize: '12px', margin: '0 0 8px 0', color: '#6b7280' }}>
+                Запустите в отдельном терминале: <code style={{ background: '#e5e7eb', padding: '2px 6px', borderRadius: '4px' }}>npm run simulator</code>
+              </p>
+              <button
+                onClick={sendToSimulator}
+                disabled={simulatorLoading}
+                style={{ padding: '8px 12px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: simulatorLoading ? 'wait' : 'pointer' }}
+              >
+                {simulatorLoading ? 'Отправка…' : 'Отправить проект в симулятор'}
+              </button>
+              {simulatorSuccess && (
+                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#059669' }}>
+                  Проект загружен. Подключите просмотрщик к <a href={SIMULATOR_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>{SIMULATOR_URL}</a>
+                </p>
+              )}
+              {simulatorError && (
+                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#dc2626' }}>{simulatorError}</p>
+              )}
             </div>
           </div>
         </div>

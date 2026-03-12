@@ -53,7 +53,12 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     return base;
   });
 
-  const configJson = JSON.stringify([tabIds, compactWidgets]);
+  const canvasMeta = {
+    width: canvasConfig?.width ?? 400,
+    height: canvasConfig?.height ?? 300,
+    color: canvasConfig?.color ?? '#ffffff',
+  };
+  const configJson = JSON.stringify([tabIds, compactWidgets, canvasMeta]);
 
   const isBidirectional = (w: Widget) =>
     w.type === 'switch' || w.type === 'slider' || w.type === 'input';
@@ -96,26 +101,57 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
   const hasSoundEnabledWidget = widgetsWithVars.some(
     (w) => w.varName === 'sound_enabled',
   );
-  const stateEntriesList: string[] = [];
+
+  // Порядок state: виджеты с переменными (как в config), затем sound_enabled (если нет в виджетах), затем ui_message.
+  // Вариант 1: массив по индексам [v0,v1,...,s,"m"]
+  const stateArrayParts: string[] = [];
   widgetsWithVars.forEach((w) => {
-    const keyBeg = stateEntriesList.length === 0 ? '{\\"' : ',\\"';
-    const stateVar = isBidirectional(w) ? `${w.varName}_in` : w.varName;
-    const keyForState = w.varName === 'sound_enabled' ? 'sound_enabled' : stateVar;
-    const keyPart = `${keyBeg}${escapeCppString(keyForState)}\\":`;
-    const valueVar = w.varName === 'sound_enabled' ? 'sound_enabled_in' : stateVar;
+    const valueVar =
+      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
     if (w.varType === 'bool') {
-      stateEntriesList.push(`  server->print("${keyPart}"); server->print(${valueVar} ? "true" : "false");`);
+      stateArrayParts.push(`  server->print(${valueVar} ? 1 : 0);`);
     } else if (w.varType === 'int' || w.varType === 'float') {
-      stateEntriesList.push(`  server->print("${keyPart}"); server->print(${valueVar});`);
+      stateArrayParts.push(`  server->print(${valueVar});`);
     } else {
-      stateEntriesList.push(`  server->print("${keyPart}"); server->print("\\""); server->print(${valueVar}); server->print("\\"");`);
+      stateArrayParts.push(`  server->print("\\""); server->print(${valueVar}); server->print("\\"");`);
     }
   });
   if (!hasSoundEnabledWidget) {
-    stateEntriesList.push('  server->print(",\\"sound_enabled\\":"); server->print(sound_enabled ? "true" : "false");');
+    stateArrayParts.push('  server->print(sound_enabled ? 1 : 0);');
   }
-  stateEntriesList.push('  server->print(",\\"ui_message\\":"); server->print("\\""); server->print(ui_message); server->print("\\"");');
-  const stateEntries = stateEntriesList.join('\n');
+  stateArrayParts.push('  server->print("\\""); server->print(ui_message); server->print("\\"");');
+
+  // Вариант 2: короткие ключи "0":v,"1":v,...,"s":bool,"m":str
+  const stateShortKeyParts: string[] = [];
+  let keyIndex = 0;
+  widgetsWithVars.forEach((w) => {
+    const key = String(keyIndex);
+    keyIndex += 1;
+    const valueVar =
+      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidirectional(w) ? `${w.varName}_in` : w.varName;
+    const keyPart = keyIndex === 1 ? `{\\"${key}\\":` : `,\\"${key}\\":`;
+    if (w.varType === 'bool') {
+      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${valueVar} ? 1 : 0);`);
+    } else if (w.varType === 'int' || w.varType === 'float') {
+      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${valueVar});`);
+    } else {
+      stateShortKeyParts.push(`  server->print("${keyPart}"); server->print("\\""); server->print(${valueVar}); server->print("\\"");`);
+    }
+  });
+  if (!hasSoundEnabledWidget) {
+    stateShortKeyParts.push('  server->print(",\\"s\\":"); server->print(sound_enabled ? 1 : 0);');
+  }
+  stateShortKeyParts.push('  server->print(",\\"m\\":"); server->print("\\""); server->print(ui_message); server->print("\\"");');
+
+  // Сборка вывода массива: [ elem0 , elem1 , ... ]
+  const stateArrayLines: string[] = [];
+  stateArrayParts.forEach((line, i) => {
+    const comma = i === 0 ? '' : '  server->print(",");\n';
+    stateArrayLines.push(comma + line);
+  });
+  const stateArrayCode = stateArrayLines.join('\n');
+
+  const stateShortKeyCode = stateShortKeyParts.join('\n');
 
   return `/* @once */
 #include "flprogWebServer.h"
@@ -197,8 +233,17 @@ void handleState(FLProgWebServer *server) {
   server->print("Access-Control-Allow-Origin: *\\r\\n");
   server->print("Content-Type: application/json\\r\\n");
   server->print("Connection: close\\r\\n\\r\\n");
-${stateEntries}
-  server->print("}");
+  String fmt = server->argumentValueAtKey("fmt");
+  if (fmt == "short") {
+    // Вариант 2: короткие ключи "0", "1", ..., "s", "m"
+${stateShortKeyCode}
+    server->print("}");
+  } else {
+    // Вариант 1 (по умолчанию): массив по индексам [v0,v1,...,s,"m"]
+    server->print("[");
+${stateArrayCode}
+    server->print("]");
+  }
 }
 
 void handlePing(FLProgWebServer *server) {
