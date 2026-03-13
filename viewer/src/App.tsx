@@ -4,7 +4,7 @@ import Konva from 'konva';
 import { contrastColor } from './contrastColor';
 import { parseConfig } from './configParser';
 
-import { getStateValueByIndex, displayValue, type StatePayload } from './stateMap';
+import { getStateValueByIndex, displayValue, getSoundType, getUiMessage, type StatePayload } from './stateMap';
 import { useViewportSize } from './useViewportSize';
 import type { RuntimeWidget } from './types';
 import './App.css';
@@ -15,6 +15,8 @@ const CANVAS_PANEL_GAP = 28;
 const POLL_INTERVAL_MS_DEFAULT = 500;
 const POLL_INTERVAL_MS_MIN = 100;
 const POLL_INTERVAL_MS_MAX = 30000;
+const AUTO_RECONNECT_INTERVAL_MS = 5000;
+const LOST_CONNECTION_ERROR = 'Соединение потеряно';
 const STORAGE_KEY_ADDRESS = 'flprog_viewer_address';
 const STORAGE_KEY_POLL_INTERVAL = 'flprog_viewer_poll_interval';
 
@@ -77,16 +79,65 @@ function parseHostPort(ipVal: string, portVal: string): { host: string; port: st
 const Stage = KonvaStage as React.ComponentType<any>;
 const Layer = (props: any) => <KonvaLayer {...props}>{props.children}</KonvaLayer>;
 
+const SOUND_DURATION = 1;
+
+/** Уведомление (sound_enabled=1): 1 сек, мягкий тон. */
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 660;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + SOUND_DURATION);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + SOUND_DURATION);
+  } catch {
+    // ignore
+  }
+}
+
+/** Тревога (sound_enabled=2): 1 сек, четыре коротких гудка. */
+function playAlarmSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'square';
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + SOUND_DURATION);
+    const beepLen = 0.18;
+    const pauseLen = 0.07;
+    for (let i = 0; i < 4; i++) {
+      const t = ctx.currentTime + i * (beepLen + pauseLen);
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.setValueAtTime(0.15, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + beepLen);
+    }
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+  } catch {
+    // ignore
+  }
+}
+
 function ViewerWidget({
   widget,
   displayText,
   canvasBgColor,
   onSetVar,
+  onInputEditRequest,
 }: {
   widget: RuntimeWidget;
   displayText: string;
   canvasBgColor: string;
   onSetVar?: (varName: string, value: string, opts?: { widgetId: string; previousValue: string }) => void;
+  onInputEditRequest?: (payload: { widget: RuntimeWidget; displayText: string; varNameForSet: string }) => void;
 }) {
   const shapeRef = useRef<Konva.Group>(null);
   const lw = widget.width;
@@ -105,21 +156,23 @@ function ViewerWidget({
       ? `${widget.varName}_out`
       : widget.varName;
 
-  const lastSetVarRef = useRef<{ key: string; at: number } | null>(null);
+  const lastSwitchClickRef = useRef<{ key: string; at: number } | null>(null);
   const CLICK_DEBOUNCE_MS = 400;
+
   const handleClick = useCallback(() => {
-    if ((widget.type !== 'button' && widget.type !== 'switch') || !onSetVar) return;
-    const next = displayText === '1' ? '0' : '1';
-    const key = `${varNameForSet}=${next}`;
-    const now = Date.now();
-    if (lastSetVarRef.current?.key === key && now - lastSetVarRef.current.at < CLICK_DEBOUNCE_MS) return;
-    lastSetVarRef.current = { key, at: now };
     if (widget.type === 'switch') {
+      if (!onSetVar) return;
+      const next = displayText === '1' ? '0' : '1';
+      const key = `${varNameForSet}=${next}`;
+      const now = Date.now();
+      if (lastSwitchClickRef.current?.key === key && now - lastSwitchClickRef.current.at < CLICK_DEBOUNCE_MS) return;
+      lastSwitchClickRef.current = { key, at: now };
       onSetVar(varNameForSet, next, { widgetId: widget.id, previousValue: displayText });
-    } else {
-      onSetVar(varNameForSet, next);
+    } else if (widget.type === 'input') {
+      if (!onInputEditRequest) return;
+      onInputEditRequest({ widget, displayText, varNameForSet });
     }
-  }, [widget.type, widget.id, displayText, onSetVar, varNameForSet]);
+  }, [widget, displayText, onSetVar, onInputEditRequest, varNameForSet]);
 
   const buttonPressedRef = useRef(false);
   const handleButtonDown = useCallback(() => {
@@ -149,7 +202,7 @@ function ViewerWidget({
     };
   }, [widget.type, onSetVar, varNameForSet]);
 
-  const isClickable = widget.type === 'button' || widget.type === 'switch';
+  const isClickable = widget.type === 'button' || widget.type === 'switch' || widget.type === 'input';
   const isButton = widget.type === 'button';
 
   return (
@@ -292,15 +345,16 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const baseUrlRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectingRef = useRef(false);
 
   const [tabIds, setTabIds] = useState<string[]>([]);
+  const [tabNames, setTabNames] = useState<string[]>([]);
   const [widgets, setWidgets] = useState<RuntimeWidget[]>([]);
   const [canvasWidth, setCanvasWidth] = useState(400);
   const [canvasHeight, setCanvasHeight] = useState(300);
   const [canvasColor, setCanvasColor] = useState('#ffffff');
   const [state, setState] = useState<StatePayload[] | Record<string, StatePayload>>({});
   const [activeTabIndex, setActiveTabIndex] = useState(0);
-  const [canvasZoom, setCanvasZoom] = useState(1);
   const [configJsonString, setConfigJsonString] = useState<string | null>(null);
   const [showConfigJson, setShowConfigJson] = useState(false);
   const [debugClicks, setDebugClicks] = useState(false);
@@ -316,7 +370,56 @@ function App() {
   const pendingSwitchRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
   const SWITCH_RESPONSE_WAIT_MS = 1000;
 
+  const [editingInput, setEditingInput] = useState<{
+    id: string;
+    varNameOut: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    value: string;
+  } | null>(null);
+
+  const soundType = connected && typeof state === 'object' && !Array.isArray(state) ? getSoundType(state) : 0;
+  const uiMessage = connected && typeof state === 'object' && !Array.isArray(state) ? getUiMessage(state) : '';
+  const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevSoundTypeRef = useRef<0 | 1 | 2>(0);
+
+  useEffect(() => {
+    const prev = prevSoundTypeRef.current;
+    prevSoundTypeRef.current = soundType;
+
+    if (soundType === 2) {
+      if (prev !== 2) {
+        if (alarmIntervalRef.current) {
+          clearInterval(alarmIntervalRef.current);
+          alarmIntervalRef.current = null;
+        }
+        playAlarmSound();
+        alarmIntervalRef.current = setInterval(playAlarmSound, 2000);
+      }
+    }
+
+    if (soundType !== 2 && alarmIntervalRef.current) {
+      clearInterval(alarmIntervalRef.current);
+      alarmIntervalRef.current = null;
+    }
+    if (soundType === 1) {
+      playNotificationSound();
+    }
+  }, [soundType, state]);
+
+  useEffect(() => {
+    return () => {
+      if (alarmIntervalRef.current) {
+        clearInterval(alarmIntervalRef.current);
+        alarmIntervalRef.current = null;
+      }
+    };
+  }, []);
+
   const connect = useCallback(async () => {
+    connectingRef.current = true;
     setError(null);
     setConnecting(true);
     setConfigJsonString(null);
@@ -334,6 +437,7 @@ function App() {
         throw new Error('Неверный формат /config');
       }
       setTabIds(parsed.tabIds);
+      setTabNames(parsed.tabNames);
       setWidgets(parsed.widgets);
       setCanvasWidth(parsed.canvasWidth);
       setCanvasHeight(parsed.canvasHeight);
@@ -342,6 +446,7 @@ function App() {
       setState({});
       setConnected(true);
       setConnecting(false);
+      connectingRef.current = false;
       saveAddress(host, p);
       if (ip !== host || port !== p) {
         setIp(host);
@@ -351,8 +456,25 @@ function App() {
       setError(e?.message || 'Не удалось подключиться');
       setConnecting(false);
       setConnected(false);
+      connectingRef.current = false;
     }
   }, [ip, port]);
+
+  const disconnect = useCallback(() => {
+    setConnected(false);
+    setError(null);
+    setConfigJsonString(null);
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const toggleConnection = useCallback(() => {
+    if (connected) disconnect();
+    else if (error) disconnect();
+    else connect();
+  }, [connected, error, connect, disconnect]);
 
   useEffect(() => {
     if (!connected || !baseUrlRef.current) return;
@@ -361,11 +483,16 @@ function App() {
     const poll = async () => {
       try {
         const res = await fetch(`${base}/state?fmt=short`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          setConnected(false);
+          setError(LOST_CONNECTION_ERROR);
+          return;
+        }
         const data = await res.json();
         setState(data);
       } catch {
-        // ignore poll errors
+        setConnected(false);
+        setError(LOST_CONNECTION_ERROR);
       }
     };
     poll();
@@ -376,6 +503,14 @@ function App() {
     };
   }, [connected, pollIntervalMs]);
 
+  useEffect(() => {
+    if (connected || !error) return;
+    const t = setInterval(() => {
+      if (!connectingRef.current) connect();
+    }, AUTO_RECONNECT_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [connected, error, connect]);
+
   const setVar = useCallback(async (varName: string, value: string) => {
     const base = baseUrlRef.current;
     if (!base) return;
@@ -385,6 +520,19 @@ function App() {
       // ignore
     }
   }, []);
+
+  const commitEditingInput = useCallback(
+    (apply: boolean) => {
+      setEditingInput((current) => {
+        if (!current) return null;
+        if (apply && connected) {
+          setVar(current.varNameOut, current.value);
+        }
+        return null;
+      });
+    },
+    [connected, setVar]
+  );
 
   type SetVarOpts = { widgetId: string; previousValue: string };
   const handleSetVar = useCallback((varName: string, value: string, opts?: SetVarOpts) => {
@@ -420,17 +568,11 @@ function App() {
   const sidebarOffset = !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0;
   const availableW = Math.max(100, viewportW - sidebarOffset - 40);
   const availableH = Math.max(100, viewportH - 67);
-  const baseScale = canvasWidth > 0 && canvasHeight > 0
+  const scale = canvasWidth > 0 && canvasHeight > 0
     ? Math.min(availableW / canvasWidth, availableH / canvasHeight)
     : 1;
-  const scale = baseScale * canvasZoom;
   const displayWidth = Math.round(canvasWidth * scale);
   const displayHeight = Math.round(canvasHeight * scale);
-
-  const zoomStep = 0.1;
-  const zoomMin = 0.25;
-  const zoomMax = 3;
-  const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const stageRef = useRef<Konva.Stage>(null);
   const handleStagePointerDown = useCallback(
@@ -658,23 +800,34 @@ function App() {
         />
         <button
           type="button"
-          onClick={connect}
-          disabled={connecting}
+          onClick={toggleConnection}
+          disabled={connecting && !error}
           style={{
             width: '100%',
             padding: 10,
-            backgroundColor: connected ? '#059669' : '#3b82f6',
+            backgroundColor: connected ? '#059669' : error ? '#b91c1c' : '#3b82f6',
             color: '#fff',
             border: 'none',
             borderRadius: 4,
-            cursor: connecting ? 'wait' : 'pointer',
+            cursor: connecting && !error ? 'wait' : 'pointer',
             fontWeight: 600,
           }}
         >
-          {connecting ? 'Подключение…' : connected ? 'Подключено' : 'Подключиться'}
+          {connecting && !error
+            ? 'Подключение…'
+            : connected
+              ? 'Отключиться'
+              : error
+                ? 'Остановить переподключение'
+                : 'Подключиться'}
         </button>
         {error && (
-          <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{error}</p>
+          <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>
+            {error}
+            <span style={{ display: 'block', color: '#64748b', marginTop: 4 }}>
+              Автопереподключение каждые {AUTO_RECONNECT_INTERVAL_MS / 1000} с. Нажмите «Остановить переподключение», чтобы отключить.
+            </span>
+          </p>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, cursor: 'pointer' }}>
           <input
@@ -749,38 +902,40 @@ function App() {
               onChange={(e) => setActiveTabIndex(tabIds.indexOf(e.target.value))}
             >
               {tabIds.map((tid, i) => (
-                <option key={tid} value={tid}>Вкладка {i + 1}</option>
+                <option key={tid} value={tid}>
+                  {tabNames[i] ?? `Вкладка ${i + 1}`}
+                </option>
               ))}
             </select>
           )}
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-            <button
-              type="button"
-              className="tab-rename-button"
-              onClick={() => setZoom(canvasZoom - zoomStep)}
-              disabled={canvasZoom <= zoomMin}
-              title="Уменьшить масштаб"
-            >
-              −
-            </button>
-            <span style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
-              {Math.round(canvasZoom * 100)}%
+          {connected && (
+            <span className="sound-indicator" style={{ marginLeft: 12, fontSize: 12, color: '#64748b' }} title="sound_enabled (Byte): 0=выкл, 1=уведомление, 2=тревога">
+              Звук: {soundType === 0 ? 'выкл' : soundType === 1 ? 'уведомление' : 'тревога'}
             </span>
-            <button
-              type="button"
-              className="tab-rename-button"
-              onClick={() => setZoom(canvasZoom + zoomStep)}
-              disabled={canvasZoom >= zoomMax}
-              title="Увеличить масштаб"
-            >
-              +
-            </button>
-          </span>
+          )}
         </div>
+        {connected && uiMessage !== '' && (
+          <div
+            className="ui-message-bar"
+            style={{
+              marginTop: 8,
+              marginBottom: 8,
+              padding: '8px 12px',
+              background: '#f1f5f9',
+              border: '1px solid #e2e8f0',
+              borderRadius: 4,
+              fontSize: 14,
+              color: '#334155',
+            }}
+          >
+            {uiMessage}
+          </div>
+        )}
         <div style={{ width: displayWidth, flexShrink: 0 }}>
           <div
             className="canvas-inner"
             style={{
+              position: 'relative',
               width: displayWidth,
               height: displayHeight,
               minWidth: displayWidth,
@@ -804,7 +959,12 @@ function App() {
               onPointerUp={handleStagePointerUp}
             >
               <Layer listening={true}>
-                <Group scaleX={scale} scaleY={scale} listening={true}>
+                <Group
+                  scaleX={scale}
+                  scaleY={scale}
+                  listening={connected}
+                  opacity={connected ? 1 : 0.45}
+                >
                   {visibleWidgets.map((w) => {
                     const stateIdx = w.stateIndex >= 0 ? (w.responseStateIndex ?? w.stateIndex) : -1;
                     const rawVal = stateIdx >= 0 ? getStateValueByIndex(state, stateIdx) : undefined;
@@ -823,12 +983,73 @@ function App() {
                         displayText={displayText}
                         canvasBgColor={canvasColor}
                         onSetVar={connected ? handleSetVar : undefined}
+                        onInputEditRequest={
+                          connected
+                            ? ({ widget, displayText, varNameForSet }) => {
+                                setEditingInput({
+                                  id: widget.id,
+                                  varNameOut: varNameForSet,
+                                  x: widget.x,
+                                  y: widget.y,
+                                  width: widget.width,
+                                  height: widget.height,
+                                  value: displayText ?? '',
+                                });
+                              }
+                            : undefined
+                        }
                       />
                     );
                   })}
                 </Group>
               </Layer>
             </Stage>
+            {editingInput && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: editingInput.x * scale,
+                  top: editingInput.y * scale,
+                  width: editingInput.width * scale,
+                  height: editingInput.height * scale,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: 'auto',
+                }}
+              >
+                <input
+                  autoFocus
+                  value={editingInput.value}
+                  onChange={(e) =>
+                    setEditingInput((current) =>
+                      current ? { ...current, value: e.target.value } : current
+                    )
+                  }
+                  onBlur={() => commitEditingInput(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitEditingInput(true);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      commitEditingInput(false);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    boxSizing: 'border-box',
+                    borderRadius: 2,
+                    border: '1px solid #3b82f6',
+                    padding: '2px 4px',
+                    fontSize: Math.max(10, 0.65 * editingInput.height * scale),
+                    fontFamily: 'inherit',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

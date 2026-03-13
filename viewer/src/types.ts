@@ -27,6 +27,8 @@ export interface CanvasConfig {
 
 export interface ViewerConfig {
   tabIds: string[];
+  /** Читабельные имена вкладок, если есть в /config; иначе автогенерированные "Вкладка N" */
+  tabNames: string[];
   widgets: RuntimeWidget[];
   canvasWidth: number;
   canvasHeight: number;

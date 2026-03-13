@@ -9,7 +9,7 @@ export interface Widget {
   caption?: string;
   color: string;
   varName: string;
-  varType: 'int' | 'float' | 'bool' | 'String' | 'none';
+  varType: 'int' | 'float' | 'bool' | 'byte' | 'String' | 'none';
   tabId?: string;
 }
 

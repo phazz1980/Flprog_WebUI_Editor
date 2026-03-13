@@ -31,13 +31,48 @@ const KEY = {
   activeTabId: 'edit_activeTabId',
 };
 
+/** Миграция/нормализация вкладок из localStorage для старых версий данных */
+function loadInitialTabs(): Tab[] {
+  try {
+    const raw = localStorage.getItem(KEY.tabs);
+    if (!raw) {
+      return [{ id: 'tab_1', name: 'Tab 1' }];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return [{ id: 'tab_1', name: 'Tab 1' }];
+    }
+    return parsed.map((t: any, index: number): Tab => ({
+      id: t?.id || `tab_${index + 1}`,
+      name: t?.name || `Tab ${index + 1}`,
+    }));
+  } catch {
+    return [{ id: 'tab_1', name: 'Tab 1' }];
+  }
+}
+
+function loadInitialActiveTabId(fallbackTabs: Tab[]): string {
+  try {
+    const stored = localStorage.getItem(KEY.activeTabId);
+    if (stored && fallbackTabs.some((t) => t.id === stored)) {
+      return stored;
+    }
+  } catch {
+    // ignore
+  }
+  return fallbackTabs[0]?.id || 'tab_1';
+}
+
+const initialTabs = loadInitialTabs();
+const initialActiveTabId = loadInitialActiveTabId(initialTabs);
+
 export const useEditStore = create<EditState>((set) => ({
   widgets: JSON.parse(localStorage.getItem(KEY.widgets) || '[]'),
   selectedId: null,
   clipboard: null,
   canvasConfig: JSON.parse(localStorage.getItem(KEY.canvas) || '{"width":320,"height":480,"color":"#ffffff"}'),
-  tabs: JSON.parse(localStorage.getItem(KEY.tabs) || '[{"id":"tab_1","name":"Tab 1"}]'),
-  activeTabId: localStorage.getItem(KEY.activeTabId) || 'tab_1',
+  tabs: initialTabs,
+  activeTabId: initialActiveTabId,
   setWidgets: (widgets) => {
     set({ widgets });
     localStorage.setItem(KEY.widgets, JSON.stringify(widgets));

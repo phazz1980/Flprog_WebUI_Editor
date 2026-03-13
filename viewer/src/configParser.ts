@@ -1,26 +1,39 @@
-import type { RuntimeWidget, WidgetType } from './types';
+import type { RuntimeWidget, WidgetType, ViewerConfig } from './types';
 
 const TYPE_BY_CODE: WidgetType[] = ['button', 'slider', 'input', 'led', 'label', 'rect', 'switch'];
 
 /**
- * Парсит ответ GET /config: [tabIds, compactWidgets] или [tabIds, compactWidgets, canvas].
- * canvas (опционально): { width, height, color } — размеры и цвет канвы из редактора.
+ * Парсит ответ GET /config: [ названияВкладок[], compactWidgets, [width, height, color] ].
+ * Первый элемент — массив названий вкладок; третий — массив [ширина, высота, цвет].
  * compactWidgets: [id, typeCode, x, y, width, height, color, text, tabIndex, varName?]
  */
-export function parseConfig(raw: unknown): { tabIds: string[]; widgets: RuntimeWidget[]; canvasWidth: number; canvasHeight: number; canvasColor: string } | null {
+export function parseConfig(raw: unknown): ViewerConfig | null {
   if (!Array.isArray(raw) || raw.length < 2) return null;
-  const tabIds = raw[0];
+  const rawTabs = raw[0];
   const compactWidgets = raw[1];
-  // Третий элемент /config — размеры канвы из редактора (width, height, color)
-  const rawCanvas = raw.length >= 3 && raw[2] != null && typeof raw[2] === 'object' && !Array.isArray(raw[2]) ? (raw[2] as Record<string, unknown>) : null;
+  const rawCanvas = raw.length >= 3 && Array.isArray(raw[2]) && raw[2].length >= 3 ? (raw[2] as unknown[]) : null;
   const canvasMeta = rawCanvas
     ? {
-        width: typeof rawCanvas.width === 'number' ? rawCanvas.width : Number(rawCanvas.width) || 0,
-        height: typeof rawCanvas.height === 'number' ? rawCanvas.height : Number(rawCanvas.height) || 0,
-        color: typeof rawCanvas.color === 'string' ? rawCanvas.color : String(rawCanvas.color || '#ffffff'),
+        width: Number(rawCanvas[0]) || 0,
+        height: Number(rawCanvas[1]) || 0,
+        color: typeof rawCanvas[2] === 'string' ? rawCanvas[2] : '#ffffff',
       }
     : null;
-  if (!Array.isArray(tabIds) || !Array.isArray(compactWidgets)) return null;
+
+  if (!Array.isArray(rawTabs) || !Array.isArray(compactWidgets)) return null;
+
+  const tabIds: string[] = [];
+  const tabNames: string[] = [];
+  (rawTabs as any[]).forEach((item, index) => {
+    tabIds.push(`tab_${index + 1}`);
+    const name = typeof item === 'string' && item.trim() ? item.trim() : `Вкладка ${index + 1}`;
+    tabNames.push(name);
+  });
+
+  if (tabIds.length === 0) {
+    tabIds.push('tab_1');
+    tabNames.push('Вкладка 1');
+  }
 
   const widgets: RuntimeWidget[] = [];
   let stateIndex = 0;
@@ -66,7 +79,7 @@ export function parseConfig(raw: unknown): { tabIds: string[]; widgets: RuntimeW
   const canvasWidth = canvasMeta && canvasMeta.width > 0 ? canvasMeta.width : inferred.width;
   const canvasHeight = canvasMeta && canvasMeta.height > 0 ? canvasMeta.height : inferred.height;
   const canvasColor = canvasMeta && canvasMeta.color && /^#[0-9a-fA-F]{3,8}$/.test(canvasMeta.color) ? canvasMeta.color : inferred.color;
-  return { tabIds, widgets, canvasWidth, canvasHeight, canvasColor };
+  return { tabIds, tabNames, widgets, canvasWidth, canvasHeight, canvasColor };
 }
 
 function inferCanvasFromWidgets(widgets: RuntimeWidget[]): { width: number; height: number; color: string } {

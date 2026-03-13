@@ -1,11 +1,35 @@
 import type { RuntimeWidget } from './types';
 
-/** State от /state — массив по индексам или объект коротких ключей {"0": v, "1": v, "s": bool, "m": str}. */
+/** State от /state — массив по индексам или объект коротких ключей {"0": v, "1": v, "s": byte, "m": str}. */
 export type StatePayload = number | string | boolean;
+
+/** sound_enabled: 0 = выкл, 1 = уведомление, 2 = тревога */
+export function getSoundType(state: StatePayload[] | Record<string, StatePayload>): 0 | 1 | 2 {
+  if (Array.isArray(state)) {
+    const v = state[state.length - 2];
+    const n = typeof v === 'number' ? v : parseInt(String(v), 10);
+    return (Number.isFinite(n) && n >= 1 && n <= 2) ? (n as 1 | 2) : 0;
+  }
+  const v = state['s'];
+  const n = typeof v === 'number' ? v : parseInt(String(v), 10);
+  return (Number.isFinite(n) && n >= 1 && n <= 2) ? (n as 1 | 2) : 0;
+}
+
+/**
+ * Из state (short: ключ "m"; массив: последний элемент) извлекает ui_message.
+ */
+export function getUiMessage(state: StatePayload[] | Record<string, StatePayload>): string {
+  if (Array.isArray(state)) {
+    const v = state[state.length - 1];
+    return v != null ? String(v) : '';
+  }
+  const v = state['m'];
+  return v != null ? String(v) : '';
+}
 
 /**
  * По state (массив или short) и списку виджетов с переменными возвращает значение по stateIndex.
- * Элементы state[n-2], state[n-1] — sound_enabled, ui_message (если нет виджета sound_enabled).
+ * Элементы state[n-2], state[n-1] — sound_enabled (byte 0/1/2), ui_message (если нет виджета sound_enabled).
  */
 export function getStateValueByIndex(
   state: StatePayload[] | Record<string, StatePayload>,

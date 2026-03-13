@@ -462,7 +462,7 @@ function App() {
   const handleGenerateCode = () => {
     const stamp = getCreationStamp();
     const baseName = `Flprog_WebUI_${stamp}`;
-    const code = generateArduinoCode(widgets, canvasConfig);
+    const code = generateArduinoCode(widgets, canvasConfig, tabs);
     const blob = new Blob([code], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -480,7 +480,7 @@ function App() {
       const res = await fetch(`${SIMULATOR_URL}/load`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ widgets, canvasConfig }),
+        body: JSON.stringify({ widgets, canvasConfig, tabs }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1128,6 +1128,7 @@ function App() {
                         <option value="int">int</option>
                         <option value="float">float</option>
                         <option value="bool">bool</option>
+                        <option value="byte">Byte</option>
                         <option value="String">String</option>
                       </select>
                     </>
@@ -1176,13 +1177,13 @@ function App() {
               <h3>Code Preview</h3>
               <button onClick={() => setShowCode(false)}>Close</button>
             </div>
-            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig)} style={{ flex: 1, fontFamily: 'monospace' }} />
+            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs)} style={{ flex: 1, fontFamily: 'monospace' }} />
             <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Download .ino</button>
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
                 onClick={() => {
-                  const code = generateArduinoCode(widgets, canvasConfig);
+                  const code = generateArduinoCode(widgets, canvasConfig, tabs);
                   if (navigator.clipboard?.writeText) {
                     navigator.clipboard.writeText(code).then(() => {
                       setCopyToastVisible(true);

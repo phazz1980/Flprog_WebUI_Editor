@@ -1,4 +1,4 @@
-import { Widget } from './types';
+import { Widget, Tab } from './types';
 
 const escapeCppString = (value: string): string =>
   (value ?? '')
@@ -6,20 +6,31 @@ const escapeCppString = (value: string): string =>
     .replace(/"/g, '\\"')
     .replace(/\n/g, '\\n');
 
-export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
+export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?: Tab[]) => {
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
   // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
   const configWidgets = widgets.filter(
     (w) => w.varType !== 'none' || w.type === 'label',
   );
 
-  const tabIds = Array.from(
+  const uniqueTabIds = Array.from(
     new Set(configWidgets.map((w) => w.tabId ?? 'tab_1')),
   );
 
+  const tabMeta = uniqueTabIds.map((id, index) => {
+    const fromTabs = tabs?.find((t) => t.id === id);
+    const fallbackName = fromTabs?.name && fromTabs.name.trim()
+      ? fromTabs.name.trim()
+      : `Вкладка ${index + 1}`;
+    return {
+      id,
+      name: fallbackName,
+    };
+  });
+
   const compactWidgets = configWidgets.map((w) => {
     const tabId = w.tabId ?? 'tab_1';
-    const tabIndex = Math.max(0, tabIds.indexOf(tabId));
+    const tabIndex = Math.max(0, uniqueTabIds.indexOf(tabId));
     const typeCode =
       w.type === 'button'
         ? 0
@@ -53,12 +64,13 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     return base;
   });
 
-  const canvasMeta = {
-    width: canvasConfig?.width ?? 400,
-    height: canvasConfig?.height ?? 300,
-    color: canvasConfig?.color ?? '#ffffff',
-  };
-  const configJson = JSON.stringify([tabIds, compactWidgets, canvasMeta]);
+  const canvasArray = [
+    canvasConfig?.width ?? 400,
+    canvasConfig?.height ?? 300,
+    canvasConfig?.color ?? '#ffffff',
+  ];
+  const tabNamesOnly = tabMeta.map((m) => m.name);
+  const configJson = JSON.stringify([tabNamesOnly, compactWidgets, canvasArray]);
 
   const isBidirectional = (w: Widget) =>
     w.type === 'switch' || w.type === 'slider' || w.type === 'input';
@@ -81,7 +93,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
       const isBidi = isBidirectional(w);
       const targetVar = isBidi ? `${w.varName}_out` : w.varName;
       let assign: string;
-      if (w.varType === 'int') {
+      if (w.varType === 'int' || w.varType === 'byte') {
         assign = `${targetVar} = varVal.toInt()`;
       } else if (w.varType === 'float') {
         assign = `${targetVar} = varVal.toFloat()`;
@@ -113,7 +125,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     const printOne = (varName: string) => {
       if (w.varType === 'bool') {
         stateArrayParts.push(`  server->print(${varName} ? 1 : 0);`);
-      } else if (w.varType === 'int' || w.varType === 'float') {
+      } else if (w.varType === 'int' || w.varType === 'float' || w.varType === 'byte') {
         stateArrayParts.push(`  server->print(${varName});`);
       } else {
         stateArrayParts.push(`  server->print("\\""); server->print(${varName}); server->print("\\"");`);
@@ -127,7 +139,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     }
   });
   if (!hasSoundEnabledWidget) {
-    stateArrayParts.push('  server->print(sound_enabled ? 1 : 0);');
+    stateArrayParts.push('  server->print(sound_enabled);');
   }
   stateArrayParts.push('  server->print("\\""); server->print(ui_message); server->print("\\"");');
 
@@ -145,7 +157,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
       const keyPart = keyIndex === 1 ? `{\\"${key}\\":` : `,\\"${key}\\":`;
       if (w.varType === 'bool') {
         stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${varName} ? 1 : 0);`);
-      } else if (w.varType === 'int' || w.varType === 'float') {
+      } else if (w.varType === 'int' || w.varType === 'float' || w.varType === 'byte') {
         stateShortKeyParts.push(`  server->print("${keyPart}"); server->print(${varName});`);
       } else {
         stateShortKeyParts.push(`  server->print("${keyPart}"); server->print("\\""); server->print(${varName}); server->print("\\"");`);
@@ -159,7 +171,7 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any) => {
     }
   });
   if (!hasSoundEnabledWidget) {
-    stateShortKeyParts.push('  server->print(",\\"s\\":"); server->print(sound_enabled ? 1 : 0);');
+    stateShortKeyParts.push('  server->print(",\\"s\\":"); server->print(sound_enabled);');
   }
   stateShortKeyParts.push('  server->print(",\\"m\\":"); server->print("\\""); server->print(ui_message); server->print("\\"");');
 
@@ -185,7 +197,7 @@ ${configJson}
 )rawliteral";
 
 ${globalVars}
-${hasSoundEnabledWidget ? '' : 'bool sound_enabled; // in\n'}
+${hasSoundEnabledWidget ? '' : 'byte sound_enabled; // in, 0=выкл 1=уведомление 2=тревога\n'}
 String ui_message; // in
 
 void setup() {

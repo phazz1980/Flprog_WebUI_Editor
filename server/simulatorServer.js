@@ -13,11 +13,19 @@ function isBidirectional(w) {
   return w.type === 'switch' || w.type === 'slider' || w.type === 'input';
 }
 
-function buildConfig(widgets) {
+function buildConfig(widgets, tabs) {
   const configWidgets = widgets.filter(
     (w) => w.varType !== 'none' || w.type === 'label'
   );
   const tabIds = [...new Set(configWidgets.map((w) => w.tabId || 'tab_1'))];
+
+  const tabMeta = tabIds.map((id, index) => {
+    const fromTabs = Array.isArray(tabs) ? tabs.find((t) => t && t.id === id) : null;
+    const fallbackName = fromTabs && typeof fromTabs.name === 'string' && fromTabs.name.trim()
+      ? fromTabs.name.trim()
+      : `Вкладка ${index + 1}`;
+    return { id, name: fallbackName };
+  });
 
   const compactWidgets = configWidgets.map((w) => {
     const tabId = w.tabId || 'tab_1';
@@ -48,7 +56,8 @@ function buildConfig(widgets) {
     return base;
   });
 
-  return [tabIds, compactWidgets];
+  const tabNamesOnly = tabMeta.map((m) => m.name);
+  return [tabNamesOnly, compactWidgets];
 }
 
 /** Из compactWidgets (массивы [id, typeCode, x, y, width, height, ...]) вычислить минимальные размеры канвы. */
@@ -67,25 +76,26 @@ function inferCanvasFromCompact(compactWidgets) {
       }
     }
   }
-  return { width: Math.max(100, w), height: Math.max(100, h), color: '#ffffff' };
+  return [Math.max(100, w), Math.max(100, h), '#ffffff'];
 }
 
-/** Конфиг для GET /config: всегда 3 элемента [tabIds, compactWidgets, canvas], чтобы просмотрщик получал размер канвы. */
+/** Конфиг для GET /config: [ tabNames, compactWidgets, [width, height, color] ]. */
 function getConfigForClient() {
   if (!project) return null;
   const config = project.config;
   if (!Array.isArray(config) || config.length < 2) return config;
-  let canvasMeta = config.length >= 3 && config[2] && typeof config[2] === 'object' && !Array.isArray(config[2])
-    ? {
-        width: config[2].width != null ? Number(config[2].width) : 400,
-        height: config[2].height != null ? Number(config[2].height) : 300,
-        color: config[2].color && typeof config[2].color === 'string' ? config[2].color : '#ffffff',
-      }
-    : null;
-  if (!canvasMeta || canvasMeta.width <= 0 || canvasMeta.height <= 0) {
-    canvasMeta = inferCanvasFromCompact(config[1]);
+  let canvasArr = null;
+  if (config.length >= 3 && Array.isArray(config[2]) && config[2].length >= 3) {
+    const w = Number(config[2][0]);
+    const h = Number(config[2][1]);
+    const c = typeof config[2][2] === 'string' ? config[2][2] : '#ffffff';
+    if (w > 0 && h > 0) canvasArr = [w, h, c];
   }
-  return [config[0], config[1], canvasMeta];
+  if (!canvasArr) {
+    const inferred = inferCanvasFromCompact(config[1]);
+    canvasArr = Array.isArray(inferred) ? inferred : [inferred.width || 400, inferred.height || 300, inferred.color || '#ffffff'];
+  }
+  return [config[0], config[1], canvasArr];
 }
 
 function buildInitialState(widgets) {
@@ -103,7 +113,7 @@ function buildInitialState(widgets) {
       state[`${w.varName}_out`] = val;
       state[`${w.varName}_in`] = val;
     } else if (w.varName === 'sound_enabled') {
-      state.sound_enabled_in = false;
+      state.sound_enabled_in = 0;
     } else {
       const raw = w.text ?? (w.type === 'led' ? '0' : '');
       const val = w.varType === 'bool' ? raw === '1' || raw === 'true'
@@ -114,7 +124,7 @@ function buildInitialState(widgets) {
     }
   });
   if (!hasSoundEnabled) {
-    state.sound_enabled = false;
+    state.sound_enabled = 0;
   }
   state.ui_message = '';
   return state;
@@ -124,8 +134,9 @@ function parseSetValue(varType, value) {
   if (varType === 'bool') {
     return value === '1' || value === 'true';
   }
-  if (varType === 'int') {
-    return parseInt(value, 10) || 0;
+  if (varType === 'int' || varType === 'byte') {
+    const n = parseInt(value, 10);
+    return Number.isFinite(n) ? n : 0;
   }
   if (varType === 'float') {
     return parseFloat(value) || 0;
@@ -134,6 +145,8 @@ function parseSetValue(varType, value) {
 }
 
 let project = null; // { config, state, widgetsWithVars, hasSoundEnabledWidget }
+/** Режим "устройство отключено": /config и /state возвращают 503, вьювер показывает тусклые виджеты. */
+let connectionEnabled = true;
 
 function handleLoad(body, res) {
   let data;
@@ -145,16 +158,17 @@ function handleLoad(body, res) {
     return;
   }
   const widgets = data.widgets || [];
+  const tabs = data.tabs || [];
   const canvasConfig = data.canvasConfig || {};
-  const configArray = buildConfig(widgets);
+  const configArray = buildConfig(widgets, tabs);
   const hasCanvasFromRequest = canvasConfig.width != null && canvasConfig.height != null &&
     Number(canvasConfig.width) > 0 && Number(canvasConfig.height) > 0;
   if (hasCanvasFromRequest) {
-    configArray.push({
-      width: Number(canvasConfig.width),
-      height: Number(canvasConfig.height),
-      color: canvasConfig.color && typeof canvasConfig.color === 'string' ? canvasConfig.color : '#ffffff',
-    });
+    configArray.push([
+      Number(canvasConfig.width),
+      Number(canvasConfig.height),
+      canvasConfig.color && typeof canvasConfig.color === 'string' ? canvasConfig.color : '#ffffff',
+    ]);
   } else {
     configArray.push(inferCanvasFromCompact(configArray[1]));
   }
@@ -224,7 +238,7 @@ function getVarsList() {
       out.push({ name: displayName, type: w.varType, setKey });
     }
   });
-  if (!hasSoundEnabledWidget) out.push({ name: 'sound_enabled', type: 'bool', setKey: 'sound_enabled' });
+  if (!hasSoundEnabledWidget) out.push({ name: 'sound_enabled', type: 'byte', setKey: 'sound_enabled' });
   out.push({ name: 'ui_message', type: 'String', setKey: 'ui_message' });
   return out;
 }
@@ -250,7 +264,8 @@ function handleSet(varName, value, res) {
     return;
   }
   if (varName === 'sound_enabled') {
-    project.state.sound_enabled = value === '1' || value === 'true';
+    const n = parseInt(value, 10);
+    project.state.sound_enabled = Number.isFinite(n) ? Math.max(0, Math.min(2, n)) : 0;
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -301,6 +316,10 @@ function getIndexHtml() {
   <div class="card">
     <h1>ESP32 Web UI (Simulator)</h1>
     <p>Use external Web app or viewer to work with this device. Config and state: <code>/config</code>, <code>/state</code>, <code>/set</code>. Значения в таблице можно редактировать.</p>
+    <div class="refresh" style="margin-top:12px;">
+      <span id="connectionStatus" style="font-weight:600;"></span>
+      <button type="button" id="connectionBtn" style="margin-left:8px;padding:6px 12px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;font-weight:600;">—</button>
+    </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;">Состояние переменных</h2>
@@ -414,6 +433,38 @@ function getIndexHtml() {
         });
       }).catch(function() { render(null, null); });
     }
+    function updateConnectionUI(enabled) {
+      var status = document.getElementById('connectionStatus');
+      var btn = document.getElementById('connectionBtn');
+      if (enabled) {
+        status.textContent = 'Устройство подключено.';
+        status.style.color = '#059669';
+        btn.textContent = 'Отключить устройство';
+        btn.style.backgroundColor = '#fef2f2';
+        btn.style.borderColor = '#fecaca';
+      } else {
+        status.textContent = 'Устройство отключено (вьювер покажет тусклые виджеты).';
+        status.style.color = '#dc2626';
+        btn.textContent = 'Подключить устройство';
+        btn.style.backgroundColor = '#f0fdf4';
+        btn.style.borderColor = '#bbf7d0';
+      }
+    }
+    function fetchConnection() {
+      fetch('/connection').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+        if (data) updateConnectionUI(data.enabled);
+      }).catch(function() { updateConnectionUI(true); });
+    }
+    document.getElementById('connectionBtn').addEventListener('click', function() {
+      fetch('/connection').then(function(r) { return r.ok ? r.json() : null; }).then(function(data) {
+        if (!data) return;
+        var next = !data.enabled;
+        fetch('/connection?enabled=' + (next ? '1' : '0')).then(function(r2) {
+          if (r2.ok) fetchConnection();
+        });
+      });
+    });
+    fetchConnection();
     document.getElementById('autoRefresh').addEventListener('change', function() {
       autoRefresh = this.checked;
       if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
@@ -457,7 +508,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (method === 'GET' && pathname === '/connection') {
+    const enabled = parsed.query?.enabled;
+    if (enabled === '0' || enabled === 'false') connectionEnabled = false;
+    else if (enabled === '1' || enabled === 'true') connectionEnabled = true;
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ enabled: connectionEnabled }));
+    return;
+  }
+
   if (method === 'GET' && pathname === '/config') {
+    if (!connectionEnabled) {
+      res.writeHead(503, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify({ error: 'Device disconnected' }));
+      return;
+    }
     const payload = getConfigForClient();
     if (!payload) {
       res.writeHead(503, { 'Content-Type': 'application/json', ...CORS });
@@ -470,6 +535,11 @@ const server = http.createServer((req, res) => {
   }
 
   if (method === 'GET' && pathname === '/state') {
+    if (!connectionEnabled) {
+      res.writeHead(503, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify({ error: 'Device disconnected' }));
+      return;
+    }
     if (!project) {
       res.writeHead(503, { 'Content-Type': 'application/json', ...CORS });
       res.end(JSON.stringify({ error: 'No project loaded. POST /load first.' }));
