@@ -469,7 +469,13 @@ function App() {
     const stamp = getCreationStamp();
     const baseName = `Flprog_WebUI_${stamp}`;
     const code = generateArduinoCode(widgets, canvasConfig, tabs);
-    const blob = new Blob([code], { type: 'text/plain' });
+    // UTF-8 с BOM — чтобы кириллица не превращалась в крокозябры при открытии в Windows
+    const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+    const encoded = new TextEncoder().encode(code);
+    const combined = new Uint8Array(utf8Bom.length + encoded.length);
+    combined.set(utf8Bom, 0);
+    combined.set(encoded, utf8Bom.length);
+    const blob = new Blob([combined], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -590,7 +596,7 @@ function App() {
     try {
       const stamp = getCreationStamp();
       const blockName = `Flprog_WebUI_${stamp}`;
-      const inoCode = generateArduinoCode(widgets, canvasConfig);
+      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs);
       const parsed = parserApi.parseArduinoCode(inoCode);
       const setupCode = parserApi.extractFunctionBody(inoCode, 'setup');
       const loopCode = parserApi.extractFunctionBody(inoCode, 'loop');
@@ -611,7 +617,9 @@ function App() {
         Boolean(parsed.not_can_many_use_by_marker)
       );
 
-      const blob = new Blob([xml], { type: 'application/xml' });
+      // UTF-8 без BOM — FLProg не открывает .ubi с BOM в начале файла
+      const xmlEncoded = new TextEncoder().encode(xml);
+      const blob = new Blob([xmlEncoded], { type: 'application/xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

@@ -396,7 +396,8 @@ function parseGlobalSection(globalSection, functions) {
       }
       splitTopLevel(decls, ',').forEach(decl => {
         const [namePart, valuePart] = splitInitializer(decl);
-        const nameMatch = namePart.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+        // Поддержка кириллицы и других Unicode-букв в именах переменных (последний идентификатор в объявлении)
+        const nameMatch = namePart.match(/[\p{L}_][\p{L}\p{N}_]*/gu);
         const varName = nameMatch ? nameMatch[nameMatch.length - 1] : null;
         if (!varName) return;
         variables[varName] = {
