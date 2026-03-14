@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/Flprog_WebUI_Editor/viewer/static/css/main.bf8bee72.css",
-    "main.js": "/Flprog_WebUI_Editor/viewer/static/js/main.78986c8e.js",
+    "main.css": "/Flprog_WebUI_Editor/viewer/static/css/main.088f7c6a.css",
+    "main.js": "/Flprog_WebUI_Editor/viewer/static/js/main.2a8520c8.js",
     "index.html": "/Flprog_WebUI_Editor/viewer/index.html",
-    "main.bf8bee72.css.map": "/Flprog_WebUI_Editor/viewer/static/css/main.bf8bee72.css.map",
-    "main.78986c8e.js.map": "/Flprog_WebUI_Editor/viewer/static/js/main.78986c8e.js.map"
+    "main.088f7c6a.css.map": "/Flprog_WebUI_Editor/viewer/static/css/main.088f7c6a.css.map",
+    "main.2a8520c8.js.map": "/Flprog_WebUI_Editor/viewer/static/js/main.2a8520c8.js.map"
   },
   "entrypoints": [
-    "static/css/main.bf8bee72.css",
-    "static/js/main.78986c8e.js"
+    "static/css/main.088f7c6a.css",
+    "static/js/main.2a8520c8.js"
   ]
 }
