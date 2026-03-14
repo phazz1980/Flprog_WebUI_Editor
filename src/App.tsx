@@ -856,6 +856,16 @@ function App() {
           >
             Демо
           </button>
+          <a
+            href={`${process.env.PUBLIC_URL || ''}/viewer/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="tab-rename-button"
+            style={{ marginLeft: '8px', textDecoration: 'none', color: 'inherit' }}
+            title="Открыть просмотрщик интерфейса (подключение к устройству по IP)"
+          >
+            Просмотр
+          </a>
             </>
           )}
         </div>

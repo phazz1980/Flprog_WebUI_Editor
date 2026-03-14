@@ -106,11 +106,13 @@ function ViewerWidget({
   displayText,
   canvasBgColor,
   onSetVar,
+  onInputClick,
 }: {
   widget: RuntimeWidget;
   displayText: string;
   canvasBgColor: string;
   onSetVar?: (varName: string, value: string, opts?: { widgetId: string; previousValue: string }) => void;
+  onInputClick?: (widget: RuntimeWidget, currentValue: string) => void;
 }) {
   const shapeRef = useRef<Konva.Group>(null);
   const lw = widget.width;
@@ -173,16 +175,19 @@ function ViewerWidget({
     };
   }, [widget.type, onSetVar, varNameForSet]);
 
-  const isClickable = widget.type === 'button' || widget.type === 'switch';
+  const isClickable = widget.type === 'button' || widget.type === 'switch' || (widget.type === 'input' && !!onInputClick);
   const isButton = widget.type === 'button';
+  const handleInputClick = useCallback(() => {
+    if (widget.type === 'input' && onInputClick) onInputClick(widget, displayText);
+  }, [widget, displayText, onInputClick]);
 
   return (
     <Group
       x={widget.x}
       y={widget.y}
       ref={shapeRef}
-      onClick={!isButton && isClickable ? handleClick : undefined}
-      onTap={!isButton && isClickable ? handleClick : undefined}
+      onClick={!isButton && isClickable ? (widget.type === 'input' ? handleInputClick : handleClick) : undefined}
+      onTap={!isButton && isClickable ? (widget.type === 'input' ? handleInputClick : handleClick) : undefined}
       onPointerDown={isButton ? handleButtonDown : undefined}
       onPointerUp={isButton ? handleButtonUp : undefined}
       onPointerUpOutside={isButton ? handleButtonUp : undefined}
@@ -346,6 +351,9 @@ function App() {
   const pendingSwitchRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
   const SWITCH_RESPONSE_WAIT_MS = 1000;
 
+  const [focusedInputWidget, setFocusedInputWidget] = useState<RuntimeWidget | null>(null);
+  const [inputOverlayValue, setInputOverlayValue] = useState('');
+
   const prevUiMessageRef = useRef<string>('');
   const [soundOffForCurrentMessage, setSoundOffForCurrentMessage] = useState(false);
   const [messageClearedByUser, setMessageClearedByUser] = useState(false);
@@ -358,6 +366,8 @@ function App() {
     setConnecting(false);
     setError(null);
     setReconnectCountdown(null);
+    setFocusedInputWidget(null);
+    setInputOverlayValue('');
     baseUrlRef.current = null;
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -730,6 +740,19 @@ function App() {
     };
   }, [draggingSliderId, handleStagePointerUp]);
 
+  const handleInputWidgetClick = useCallback((widget: RuntimeWidget, currentValue: string) => {
+    setFocusedInputWidget(widget);
+    setInputOverlayValue(currentValue);
+  }, []);
+
+  const submitInputOverlay = useCallback(() => {
+    if (!focusedInputWidget || !setVar) return;
+    const varNameOut = `${focusedInputWidget.varName}_out`;
+    setVar(varNameOut, inputOverlayValue);
+    setFocusedInputWidget(null);
+    setInputOverlayValue('');
+  }, [focusedInputWidget, inputOverlayValue, setVar]);
+
   const handleCanvasContainerPointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (debugClicks) {
@@ -905,7 +928,7 @@ function App() {
               flexDirection: 'column',
             }}
           >
-            <div style={{ width: displayWidth, height: stageDisplayHeight, flexShrink: 0 }}>
+            <div style={{ position: 'relative', width: displayWidth, height: stageDisplayHeight, flexShrink: 0 }}>
               <Stage
                 ref={stageRef}
                 width={displayWidth}
@@ -936,12 +959,44 @@ function App() {
                           displayText={displayText}
                           canvasBgColor={canvasColor}
                           onSetVar={connected ? handleSetVar : undefined}
+                          onInputClick={connected ? handleInputWidgetClick : undefined}
                         />
                       );
                     })}
                   </Group>
                 </Layer>
               </Stage>
+              {focusedInputWidget && connected && (
+                <input
+                  type="text"
+                  value={inputOverlayValue}
+                  onChange={(e) => setInputOverlayValue(e.target.value)}
+                  onBlur={submitInputOverlay}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  autoFocus
+                  style={{
+                    position: 'absolute',
+                    left: focusedInputWidget.x * scale,
+                    top: focusedInputWidget.y * scale,
+                    width: focusedInputWidget.width * scale,
+                    height: focusedInputWidget.height * scale,
+                    margin: 0,
+                    padding: '2px 6px',
+                    boxSizing: 'border-box',
+                    border: '1px solid #94a3b8',
+                    borderRadius: 2,
+                    fontSize: Math.max(10, Math.round(0.65 * 0.85 * focusedInputWidget.height * scale)),
+                    outline: 'none',
+                    pointerEvents: 'auto',
+                  }}
+                  aria-label="Поле ввода"
+                />
+              )}
             </div>
             <div
               style={{
