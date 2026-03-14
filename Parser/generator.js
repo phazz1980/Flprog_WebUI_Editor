@@ -414,7 +414,8 @@ export function createUbiXmlSixx(
   const libsId = nextId();
 
   const blockLabel = (blockTitle != null && String(blockTitle).trim()) ? String(blockTitle).trim() : blockName;
-  let xml = '<sixx.object sixx.id="' + rootId + '" sixx.type="BlocksLibraryElement" sixx.env="Arduino" >\n';
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+  xml += '<sixx.object sixx.id="' + rootId + '" sixx.type="BlocksLibraryElement" sixx.env="Arduino" >\n';
   xml += '\t<sixx.object sixx.id="' + codeBlockId + '" sixx.name="typeClass" sixx.type="CodeUserBlock" sixx.env="Arduino" >\n';
   xml += '\t\t<sixx.object sixx.id="' + blocksCollId + '" sixx.name="blocks" sixx.type="OrderedCollection" sixx.env="Core" ></sixx.object>\n';
   xml += '\t\t<sixx.object sixx.id="' + labelId + '" sixx.name="label" sixx.type="String" sixx.env="Core" >' + blockLabel + '</sixx.object>\n';
