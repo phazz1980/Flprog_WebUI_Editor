@@ -4,19 +4,20 @@ import Konva from 'konva';
 import { contrastColor } from './contrastColor';
 import { parseConfig } from './configParser';
 
-import { getStateValueByIndex, displayValue, getSoundType, getUiMessage, type StatePayload } from './stateMap';
+import { getStateValueByIndex, getSoundEnabled, getUiMessage, displayValue, type StatePayload } from './stateMap';
 import { useViewportSize } from './useViewportSize';
+import { playNotificationOnce, startAlarmLoop, stopAlarm, isAlarmPlaying } from './soundPlayer';
 import type { RuntimeWidget } from './types';
 import './App.css';
 
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
 const CANVAS_PANEL_GAP = 28;
+/** Отступ слева, когда левая панель скрыта, чтобы канва не заезжала на кнопку «☰». */
+const LEFT_TOGGLE_OFFSET = 48;
 const POLL_INTERVAL_MS_DEFAULT = 500;
 const POLL_INTERVAL_MS_MIN = 100;
 const POLL_INTERVAL_MS_MAX = 30000;
-const AUTO_RECONNECT_INTERVAL_MS = 5000;
-const LOST_CONNECTION_ERROR = 'Соединение потеряно';
 const STORAGE_KEY_ADDRESS = 'flprog_viewer_address';
 const STORAGE_KEY_POLL_INTERVAL = 'flprog_viewer_poll_interval';
 
@@ -63,81 +64,53 @@ function savePollInterval(ms: number) {
   }
 }
 
-/** Разбирает поле IP: допускается "host" или "host:port" (например localhost:31337). */
-function parseHostPort(ipVal: string, portVal: string): { host: string; port: string } {
+/** Читает из URL параметры ?host=...&port=...&connect=1 для встраивания в редактор. */
+function getUrlParams(): { host?: string; port?: string; connect: boolean } {
+  if (typeof window === 'undefined' || !window.location.search) return { connect: false };
+  const p = new URLSearchParams(window.location.search);
+  const host = p.get('host')?.trim();
+  const port = p.get('port')?.trim();
+  const connect = p.get('connect') === '1' || p.get('connect')?.toLowerCase() === 'true';
+  return { host: host || undefined, port: port || undefined, connect };
+}
+
+/** Разбирает поле IP: допускается "host", "host:port" или полный URL (http://host:port, https://host). */
+function parseHostPort(ipVal: string, portVal: string): { host: string; port: string; scheme: 'http' | 'https' } {
   const trimmed = ipVal.trim();
-  if (!trimmed) return { host: '192.168.1.1', port: portVal.trim() || '80' };
+  const fallbackPort = portVal.trim() || '80';
+  if (!trimmed) return { host: '192.168.1.1', port: fallbackPort, scheme: 'http' };
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+      const scheme = url.protocol === 'https:' ? 'https' : 'http';
+      return { host: url.hostname, port, scheme };
+    } catch {
+      // невалидный URL — продолжаем как обычный host[:port]
+    }
+  }
   const lastColon = trimmed.lastIndexOf(':');
   if (lastColon > 0) {
     const host = trimmed.slice(0, lastColon);
     const portPart = trimmed.slice(lastColon + 1).trim();
-    return { host, port: portPart || portVal.trim() || '80' };
+    return { host, port: portPart || fallbackPort, scheme: 'http' };
   }
-  return { host: trimmed, port: portVal.trim() || '80' };
+  return { host: trimmed, port: fallbackPort, scheme: 'http' };
 }
 
 const Stage = KonvaStage as React.ComponentType<any>;
 const Layer = (props: any) => <KonvaLayer {...props}>{props.children}</KonvaLayer>;
-
-const SOUND_DURATION = 1;
-
-/** Уведомление (sound_enabled=1): 1 сек, мягкий тон. */
-function playNotificationSound() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 660;
-    osc.type = 'sine';
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + SOUND_DURATION);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + SOUND_DURATION);
-  } catch {
-    // ignore
-  }
-}
-
-/** Тревога (sound_enabled=2): 1 сек, четыре коротких гудка. */
-function playAlarmSound() {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 880;
-    osc.type = 'square';
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + SOUND_DURATION);
-    const beepLen = 0.18;
-    const pauseLen = 0.07;
-    for (let i = 0; i < 4; i++) {
-      const t = ctx.currentTime + i * (beepLen + pauseLen);
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.setValueAtTime(0.15, t + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + beepLen);
-    }
-    gain.gain.setValueAtTime(0, ctx.currentTime);
-  } catch {
-    // ignore
-  }
-}
 
 function ViewerWidget({
   widget,
   displayText,
   canvasBgColor,
   onSetVar,
-  onInputEditRequest,
 }: {
   widget: RuntimeWidget;
   displayText: string;
   canvasBgColor: string;
   onSetVar?: (varName: string, value: string, opts?: { widgetId: string; previousValue: string }) => void;
-  onInputEditRequest?: (payload: { widget: RuntimeWidget; displayText: string; varNameForSet: string }) => void;
 }) {
   const shapeRef = useRef<Konva.Group>(null);
   const lw = widget.width;
@@ -156,23 +129,21 @@ function ViewerWidget({
       ? `${widget.varName}_out`
       : widget.varName;
 
-  const lastSwitchClickRef = useRef<{ key: string; at: number } | null>(null);
+  const lastSetVarRef = useRef<{ key: string; at: number } | null>(null);
   const CLICK_DEBOUNCE_MS = 400;
-
   const handleClick = useCallback(() => {
+    if ((widget.type !== 'button' && widget.type !== 'switch') || !onSetVar) return;
+    const next = displayText === '1' ? '0' : '1';
+    const key = `${varNameForSet}=${next}`;
+    const now = Date.now();
+    if (lastSetVarRef.current?.key === key && now - lastSetVarRef.current.at < CLICK_DEBOUNCE_MS) return;
+    lastSetVarRef.current = { key, at: now };
     if (widget.type === 'switch') {
-      if (!onSetVar) return;
-      const next = displayText === '1' ? '0' : '1';
-      const key = `${varNameForSet}=${next}`;
-      const now = Date.now();
-      if (lastSwitchClickRef.current?.key === key && now - lastSwitchClickRef.current.at < CLICK_DEBOUNCE_MS) return;
-      lastSwitchClickRef.current = { key, at: now };
       onSetVar(varNameForSet, next, { widgetId: widget.id, previousValue: displayText });
-    } else if (widget.type === 'input') {
-      if (!onInputEditRequest) return;
-      onInputEditRequest({ widget, displayText, varNameForSet });
+    } else {
+      onSetVar(varNameForSet, next);
     }
-  }, [widget, displayText, onSetVar, onInputEditRequest, varNameForSet]);
+  }, [widget.type, widget.id, displayText, onSetVar, varNameForSet]);
 
   const buttonPressedRef = useRef(false);
   const handleButtonDown = useCallback(() => {
@@ -202,7 +173,7 @@ function ViewerWidget({
     };
   }, [widget.type, onSetVar, varNameForSet]);
 
-  const isClickable = widget.type === 'button' || widget.type === 'switch' || widget.type === 'input';
+  const isClickable = widget.type === 'button' || widget.type === 'switch';
   const isButton = widget.type === 'button';
 
   return (
@@ -337,15 +308,20 @@ function App() {
     }
   }, [isMobile]);
 
-  const [ip, setIp] = useState(() => loadSavedAddress().ip);
-  const [port, setPort] = useState(() => loadSavedAddress().port);
+  const urlParamsRef = useRef(getUrlParams());
+  const saved = loadSavedAddress();
+  const [ip, setIp] = useState(() => urlParamsRef.current.host ?? saved.ip);
+  const [port, setPort] = useState(() => urlParamsRef.current.port ?? saved.port);
   const [pollIntervalMs, setPollIntervalMs] = useState(() => loadSavedPollInterval());
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [autoReconnect, setAutoReconnect] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
   const baseUrlRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectingRef = useRef(false);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [tabIds, setTabIds] = useState<string[]>([]);
   const [tabNames, setTabNames] = useState<string[]>([]);
@@ -370,61 +346,40 @@ function App() {
   const pendingSwitchRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
   const SWITCH_RESPONSE_WAIT_MS = 1000;
 
-  const [editingInput, setEditingInput] = useState<{
-    id: string;
-    varNameOut: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    value: string;
-  } | null>(null);
+  const prevUiMessageRef = useRef<string>('');
+  const [soundOffForCurrentMessage, setSoundOffForCurrentMessage] = useState(false);
+  const [messageClearedByUser, setMessageClearedByUser] = useState(false);
 
-  const soundType = connected && typeof state === 'object' && !Array.isArray(state) ? getSoundType(state) : 0;
-  const uiMessage = connected && typeof state === 'object' && !Array.isArray(state) ? getUiMessage(state) : '';
-  const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevSoundTypeRef = useRef<0 | 1 | 2>(0);
+  const RECONNECT_DELAY_MS = 3000;
 
-  useEffect(() => {
-    const prev = prevSoundTypeRef.current;
-    prevSoundTypeRef.current = soundType;
-
-    if (soundType === 2) {
-      if (prev !== 2) {
-        if (alarmIntervalRef.current) {
-          clearInterval(alarmIntervalRef.current);
-          alarmIntervalRef.current = null;
-        }
-        playAlarmSound();
-        alarmIntervalRef.current = setInterval(playAlarmSound, 2000);
-      }
+  const disconnect = useCallback(() => {
+    setAutoReconnect(false);
+    setConnected(false);
+    setConnecting(false);
+    setError(null);
+    setReconnectCountdown(null);
+    baseUrlRef.current = null;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
-
-    if (soundType !== 2 && alarmIntervalRef.current) {
-      clearInterval(alarmIntervalRef.current);
-      alarmIntervalRef.current = null;
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
-    if (soundType === 1) {
-      playNotificationSound();
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
     }
-  }, [soundType, state]);
-
-  useEffect(() => {
-    return () => {
-      if (alarmIntervalRef.current) {
-        clearInterval(alarmIntervalRef.current);
-        alarmIntervalRef.current = null;
-      }
-    };
   }, []);
 
   const connect = useCallback(async () => {
-    connectingRef.current = true;
     setError(null);
+    setReconnectCountdown(null);
     setConnecting(true);
     setConfigJsonString(null);
-    const { host, port: p } = parseHostPort(ip, port);
-    const base = `http://${host}:${p}`;
+    const { host, port: p, scheme } = parseHostPort(ip, port);
+    const base = `${scheme}://${host}:${p}`;
     baseUrlRef.current = base;
     try {
       const res = await fetch(`${base}/config`);
@@ -446,7 +401,6 @@ function App() {
       setState({});
       setConnected(true);
       setConnecting(false);
-      connectingRef.current = false;
       saveAddress(host, p);
       if (ip !== host || port !== p) {
         setIp(host);
@@ -456,25 +410,24 @@ function App() {
       setError(e?.message || 'Не удалось подключиться');
       setConnecting(false);
       setConnected(false);
-      connectingRef.current = false;
     }
   }, [ip, port]);
 
-  const disconnect = useCallback(() => {
-    setConnected(false);
-    setError(null);
-    setConfigJsonString(null);
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
   const toggleConnection = useCallback(() => {
-    if (connected) disconnect();
-    else if (error) disconnect();
-    else connect();
-  }, [connected, error, connect, disconnect]);
+    if (autoReconnect) {
+      disconnect();
+    } else if (!connecting) {
+      setAutoReconnect(true);
+      connect();
+    }
+  }, [autoReconnect, connecting, connect, disconnect]);
+
+  const didAutoConnectRef = useRef(false);
+  useEffect(() => {
+    if (didAutoConnectRef.current || !urlParamsRef.current.connect) return;
+    didAutoConnectRef.current = true;
+    connect();
+  }, [connect]);
 
   useEffect(() => {
     if (!connected || !baseUrlRef.current) return;
@@ -484,15 +437,15 @@ function App() {
       try {
         const res = await fetch(`${base}/state?fmt=short`);
         if (!res.ok) {
+          setError('Соединение потеряно');
           setConnected(false);
-          setError(LOST_CONNECTION_ERROR);
           return;
         }
         const data = await res.json();
         setState(data);
       } catch {
+        setError('Соединение потеряно');
         setConnected(false);
-        setError(LOST_CONNECTION_ERROR);
       }
     };
     poll();
@@ -504,12 +457,28 @@ function App() {
   }, [connected, pollIntervalMs]);
 
   useEffect(() => {
-    if (connected || !error) return;
-    const t = setInterval(() => {
-      if (!connectingRef.current) connect();
-    }, AUTO_RECONNECT_INTERVAL_MS);
-    return () => clearInterval(t);
-  }, [connected, error, connect]);
+    if (!autoReconnect || connected || connecting) return;
+    const seconds = Math.ceil(RECONNECT_DELAY_MS / 1000);
+    setReconnectCountdown(seconds);
+    let remaining = seconds;
+    const id = setInterval(() => {
+      remaining -= 1;
+      setReconnectCountdown(remaining <= 0 ? null : remaining);
+      if (remaining <= 0) {
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+        connect();
+      }
+    }, 1000);
+    countdownIntervalRef.current = id;
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      setReconnectCountdown(null);
+    };
+  }, [autoReconnect, connected, connecting, connect]);
 
   const setVar = useCallback(async (varName: string, value: string) => {
     const base = baseUrlRef.current;
@@ -520,19 +489,6 @@ function App() {
       // ignore
     }
   }, []);
-
-  const commitEditingInput = useCallback(
-    (apply: boolean) => {
-      setEditingInput((current) => {
-        if (!current) return null;
-        if (apply && connected) {
-          setVar(current.varNameOut, current.value);
-        }
-        return null;
-      });
-    },
-    [connected, setVar]
-  );
 
   type SetVarOpts = { widgetId: string; previousValue: string };
   const handleSetVar = useCallback((varName: string, value: string, opts?: SetVarOpts) => {
@@ -564,15 +520,20 @@ function App() {
 
   const activeTabId = tabIds[activeTabIndex] ?? tabIds[0];
   const visibleWidgets = widgets.filter((w) => w.tabId === activeTabId);
+  const soundEnabled = connected ? getSoundEnabled(state) : 0;
 
-  const sidebarOffset = !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0;
+  const MESSAGE_BAR_HEIGHT = 44;
+  const sidebarOffset = !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET;
   const availableW = Math.max(100, viewportW - sidebarOffset - 40);
   const availableH = Math.max(100, viewportH - 67);
-  const scale = canvasWidth > 0 && canvasHeight > 0
+  const baseScale = canvasWidth > 0 && canvasHeight > 0
     ? Math.min(availableW / canvasWidth, availableH / canvasHeight)
     : 1;
+  const scale = baseScale;
   const displayWidth = Math.round(canvasWidth * scale);
   const displayHeight = Math.round(canvasHeight * scale);
+  const CANVAS_BORDER = 3;
+  const stageDisplayHeight = displayHeight - MESSAGE_BAR_HEIGHT - CANVAS_BORDER * 2;
 
   const stageRef = useRef<Konva.Stage>(null);
   const handleStagePointerDown = useCallback(
@@ -736,6 +697,28 @@ function App() {
     }
   }, [state, widgets]);
 
+  // Звук: сравниваем сообщение (ui_message); если изменилось — включаем звук в соответствии с sound_enabled (2 = авария, 1 = уведомление). Аларм имеет приоритет.
+  useEffect(() => {
+    if (!connected) return;
+    const uiMessage = getUiMessage(state);
+    const soundEnabled = getSoundEnabled(state);
+    if (uiMessage !== prevUiMessageRef.current) {
+      setSoundOffForCurrentMessage(false);
+      setMessageClearedByUser(false);
+      prevUiMessageRef.current = uiMessage;
+    } else {
+      return;
+    }
+
+    if (soundEnabled === 2) {
+      startAlarmLoop();
+      return;
+    }
+    if (soundEnabled === 1 && !isAlarmPlaying()) {
+      playNotificationOnce();
+    }
+  }, [connected, state]);
+
   useEffect(() => {
     if (!draggingSliderId) return;
     const onUp = () => handleStagePointerUp();
@@ -764,15 +747,14 @@ function App() {
   return (
     <div className="App app-root">
       <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
-        <button className="mobile-sidebar-close" onClick={() => setShowLeftPanel(false)}>×</button>
-        <h3 style={{ marginTop: 0, marginBottom: 12 }}>Подключение</h3>
+        <h3 style={{ marginTop: 25, marginBottom: 12 }}>Подключение</h3>
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Адрес (IP или host:port)</label>
         <input
           type="text"
           value={ip}
           onChange={(e) => setIp(e.target.value)}
           onBlur={() => saveAddress(ip.trim() || '192.168.1.1', port.trim() || '80')}
-          placeholder="192.168.1.1 или localhost:31337"
+          placeholder="192.168.1.1, localhost:31337 или http://host:port"
           style={{ width: '100%', marginBottom: 10, padding: '6px 8px', boxSizing: 'border-box' }}
         />
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Порт (если не указан в адресе)</label>
@@ -801,32 +783,28 @@ function App() {
         <button
           type="button"
           onClick={toggleConnection}
-          disabled={connecting && !error}
+          disabled={connecting}
           style={{
             width: '100%',
             padding: 10,
-            backgroundColor: connected ? '#059669' : error ? '#b91c1c' : '#3b82f6',
+            backgroundColor: autoReconnect ? '#059669' : '#3b82f6',
             color: '#fff',
             border: 'none',
             borderRadius: 4,
-            cursor: connecting && !error ? 'wait' : 'pointer',
+            cursor: connecting ? 'wait' : 'pointer',
             fontWeight: 600,
           }}
         >
-          {connecting && !error
-            ? 'Подключение…'
-            : connected
-              ? 'Отключиться'
-              : error
-                ? 'Остановить переподключение'
-                : 'Подключиться'}
+          {autoReconnect ? 'Отключиться' : 'Подключиться'}
         </button>
-        {error && (
+        {error != null && (
           <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>
-            {error}
-            <span style={{ display: 'block', color: '#64748b', marginTop: 4 }}>
-              Автопереподключение каждые {AUTO_RECONNECT_INTERVAL_MS / 1000} с. Нажмите «Остановить переподключение», чтобы отключить.
-            </span>
+            Ошибка подключения: {error}
+          </p>
+        )}
+        {reconnectCountdown != null && reconnectCountdown > 0 && (
+          <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+            Повтор через {reconnectCountdown} сек
           </p>
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, cursor: 'pointer' }}>
@@ -889,7 +867,7 @@ function App() {
       <div
         className="canvas-container"
         style={{
-          marginLeft: !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0,
+          marginLeft: !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET,
           transition: 'margin 0.2s ease',
         }}
         onPointerDownCapture={handleCanvasContainerPointerDown}
@@ -902,40 +880,15 @@ function App() {
               onChange={(e) => setActiveTabIndex(tabIds.indexOf(e.target.value))}
             >
               {tabIds.map((tid, i) => (
-                <option key={tid} value={tid}>
-                  {tabNames[i] ?? `Вкладка ${i + 1}`}
-                </option>
+                <option key={tid} value={tid}>{tabNames[i] ?? `Вкладка ${i + 1}`}</option>
               ))}
             </select>
           )}
-          {connected && (
-            <span className="sound-indicator" style={{ marginLeft: 12, fontSize: 12, color: '#64748b' }} title="sound_enabled (Byte): 0=выкл, 1=уведомление, 2=тревога">
-              Звук: {soundType === 0 ? 'выкл' : soundType === 1 ? 'уведомление' : 'тревога'}
-            </span>
-          )}
         </div>
-        {connected && uiMessage !== '' && (
-          <div
-            className="ui-message-bar"
-            style={{
-              marginTop: 8,
-              marginBottom: 8,
-              padding: '8px 12px',
-              background: '#f1f5f9',
-              border: '1px solid #e2e8f0',
-              borderRadius: 4,
-              fontSize: 14,
-              color: '#334155',
-            }}
-          >
-            {uiMessage}
-          </div>
-        )}
         <div style={{ width: displayWidth, flexShrink: 0 }}>
           <div
             className="canvas-inner"
             style={{
-              position: 'relative',
               width: displayWidth,
               height: displayHeight,
               minWidth: displayWidth,
@@ -945,111 +898,113 @@ function App() {
               boxSizing: 'border-box',
               boxShadow: '0 0 0 1px #334155, 0 8px 24px rgba(0,0,0,0.18)',
               borderRadius: 6,
-              pointerEvents: 'auto',
+              pointerEvents: connected ? 'auto' : 'none',
+              opacity: connected ? 1 : 0.5,
+              transition: 'opacity 0.2s ease',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            <Stage
-              ref={stageRef}
-              width={displayWidth}
-              height={displayHeight}
-              style={{ display: 'block' }}
-              onPointerDown={handleStagePointerDown}
-              onTouchStart={handleStagePointerDown as any}
-              onPointerMove={handleStagePointerMove}
-              onPointerUp={handleStagePointerUp}
-            >
-              <Layer listening={true}>
-                <Group
-                  scaleX={scale}
-                  scaleY={scale}
-                  listening={connected}
-                  opacity={connected ? 1 : 0.45}
-                >
-                  {visibleWidgets.map((w) => {
-                    const stateIdx = w.stateIndex >= 0 ? (w.responseStateIndex ?? w.stateIndex) : -1;
-                    const rawVal = stateIdx >= 0 ? getStateValueByIndex(state, stateIdx) : undefined;
-                    let displayText = displayValue(w, rawVal, w.text ?? '');
-                    if (w.type === 'slider') {
-                      if (localSliderValues[w.id] !== undefined) displayText = String(Math.round(localSliderValues[w.id]));
-                      else if (sliderRevertOverrides[w.id] !== undefined) displayText = sliderRevertOverrides[w.id];
-                    } else if (w.type === 'switch') {
-                      if (switchDisplayOverrides[w.id] !== undefined) displayText = switchDisplayOverrides[w.id];
-                      else if (switchRevertOverrides[w.id] !== undefined) displayText = switchRevertOverrides[w.id];
-                    }
-                    return (
-                      <ViewerWidget
-                        key={w.id}
-                        widget={w}
-                        displayText={displayText}
-                        canvasBgColor={canvasColor}
-                        onSetVar={connected ? handleSetVar : undefined}
-                        onInputEditRequest={
-                          connected
-                            ? ({ widget, displayText, varNameForSet }) => {
-                                setEditingInput({
-                                  id: widget.id,
-                                  varNameOut: varNameForSet,
-                                  x: widget.x,
-                                  y: widget.y,
-                                  width: widget.width,
-                                  height: widget.height,
-                                  value: displayText ?? '',
-                                });
-                              }
-                            : undefined
-                        }
-                      />
-                    );
-                  })}
-                </Group>
-              </Layer>
-            </Stage>
-            {editingInput && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: editingInput.x * scale,
-                  top: editingInput.y * scale,
-                  width: editingInput.width * scale,
-                  height: editingInput.height * scale,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  pointerEvents: 'auto',
-                }}
+            <div style={{ width: displayWidth, height: stageDisplayHeight, flexShrink: 0 }}>
+              <Stage
+                ref={stageRef}
+                width={displayWidth}
+                height={stageDisplayHeight}
+                style={{ display: 'block' }}
+                onPointerDown={handleStagePointerDown}
+                onTouchStart={handleStagePointerDown as any}
+                onPointerMove={handleStagePointerMove}
+                onPointerUp={handleStagePointerUp}
               >
-                <input
-                  autoFocus
-                  value={editingInput.value}
-                  onChange={(e) =>
-                    setEditingInput((current) =>
-                      current ? { ...current, value: e.target.value } : current
-                    )
-                  }
-                  onBlur={() => commitEditingInput(true)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      commitEditingInput(true);
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      commitEditingInput(false);
+                <Layer listening={true}>
+                  <Group scaleX={scale} scaleY={scale} listening={true}>
+                    {visibleWidgets.map((w) => {
+                      const stateIdx = w.stateIndex >= 0 ? (w.responseStateIndex ?? w.stateIndex) : -1;
+                      const rawVal = stateIdx >= 0 ? getStateValueByIndex(state, stateIdx) : undefined;
+                      let displayText = displayValue(w, rawVal, w.text ?? '');
+                      if (w.type === 'slider') {
+                        if (localSliderValues[w.id] !== undefined) displayText = String(Math.round(localSliderValues[w.id]));
+                        else if (sliderRevertOverrides[w.id] !== undefined) displayText = sliderRevertOverrides[w.id];
+                      } else if (w.type === 'switch') {
+                        if (switchDisplayOverrides[w.id] !== undefined) displayText = switchDisplayOverrides[w.id];
+                        else if (switchRevertOverrides[w.id] !== undefined) displayText = switchRevertOverrides[w.id];
+                      }
+                      return (
+                        <ViewerWidget
+                          key={w.id}
+                          widget={w}
+                          displayText={displayText}
+                          canvasBgColor={canvasColor}
+                          onSetVar={connected ? handleSetVar : undefined}
+                        />
+                      );
+                    })}
+                  </Group>
+                </Layer>
+              </Stage>
+            </div>
+            <div
+              style={{
+                height: MESSAGE_BAR_HEIGHT,
+                minHeight: MESSAGE_BAR_HEIGHT,
+                padding: '8px 10px',
+                boxSizing: 'border-box',
+                borderTop: '1px solid #64748b',
+                backgroundColor: '#f8fafc',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+                {connected && !messageClearedByUser ? (getUiMessage(state) || '—') : '—'}
+              </span>
+              {(soundEnabled === 2 || isAlarmPlaying() || (connected && getUiMessage(state))) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isAlarmPlaying() && !soundOffForCurrentMessage) {
+                      stopAlarm();
+                      setSoundOffForCurrentMessage(true);
+                    } else {
+                      setMessageClearedByUser(true);
+                      setSoundOffForCurrentMessage(false);
                     }
                   }}
                   style={{
-                    width: '100%',
-                    height: '100%',
-                    boxSizing: 'border-box',
-                    borderRadius: 2,
-                    border: '1px solid #3b82f6',
-                    padding: '2px 4px',
-                    fontSize: Math.max(10, 0.65 * editingInput.height * scale),
-                    fontFamily: 'inherit',
-                    outline: 'none',
+                    padding: 6,
+                    color: '#fff',
+                    backgroundColor: soundOffForCurrentMessage ? '#475569' : '#dc2626',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
-                />
-              </div>
-            )}
+                  title={soundOffForCurrentMessage ? 'Очистить сообщение' : 'Отключить звук'}
+                >
+                  {soundOffForCurrentMessage ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 6 22 18 22 18 15 22 15 22 9 18 9 13 5" />
+                      <line x1="23" y1="9" x2="16" y2="16" />
+                      <line x1="16" y1="9" x2="23" y2="16" />
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

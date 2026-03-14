@@ -11,6 +11,8 @@ import { GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
 const CANVAS_PANEL_GAP = 28;
+/** Отступ, когда панель скрыта, чтобы канва не заезжала на кнопки «☰» / «⚙». */
+const LEFT_TOGGLE_OFFSET = 48;
 import './App.css';
 
 /** Stage: use KonvaStage with relaxed types (react-konva typings are incomplete for Stage) */
@@ -314,6 +316,10 @@ function App() {
   const scale = baseScale * canvasZoom;
   const displayWidth = Math.round(canvasConfig.width * scale);
   const displayHeight = Math.round(canvasConfig.height * scale);
+
+  const MESSAGE_BAR_HEIGHT = 44;
+  const CANVAS_BORDER = 3;
+  const stageDisplayHeight = displayHeight - MESSAGE_BAR_HEIGHT - CANVAS_BORDER * 2;
 
   const zoomStep = 0.1;
   const zoomMin = 0.25;
@@ -778,8 +784,8 @@ function App() {
       <div
         className="canvas-container"
         style={{
-          marginLeft: demoMode ? 0 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0),
-          marginRight: demoMode ? 0 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0),
+          marginLeft: demoMode ? 0 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
+          marginRight: demoMode ? 0 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
           transition: 'margin 0.2s ease',
         }}
       >
@@ -874,39 +880,59 @@ function App() {
               boxSizing: 'border-box',
               boxShadow: '0 0 0 1px #334155, 0 8px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08)',
               borderRadius: '6px',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            <Stage ref={stageRef} width={displayWidth} height={displayHeight} onMouseDown={(e: any) => { if (!demoMode && e.target === e.target.getStage()) selectWidget(null); }}>
-              <Layer>
-                <Group scaleX={scale} scaleY={scale}>
-                  {gridVisible && !demoMode && (
-                    <>
-                      {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
-                        <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
-                      ))}
-                      {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
-                        <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={gridStrokeMinor} strokeWidth={1} />
-                      ))}
-                    </>
-                  )}
-                  {widgets.filter((w: Widget) => (w.tabId || 'tab_1') === activeTabId).map((w: Widget) => (
-                    <WidgetComponent
-                      key={w.id}
-                      shapeProps={w.id === selectedId && previewWidgetColor != null ? { ...w, color: previewWidgetColor } : w}
-                      isSelected={!demoMode && w.id === selectedId}
-                      onSelect={() => selectWidget(w.id)}
-                      onChange={(attrs: any) => updateWidget(w.id, attrs)}
-                      canvasBgColor={previewCanvasColor ?? canvasConfig.color}
-                      isDemoMode={demoMode}
-                      demoDisplayValue={demoValues[w.id]}
-                      onDemoClick={demoMode ? handleDemoClick : undefined}
-                      onDemoSliderChange={demoMode ? handleDemoSliderChange : undefined}
-                      onDemoInputFocus={demoMode ? handleDemoInputFocus : undefined}
-                    />
-                  ))}
-                </Group>
-              </Layer>
-            </Stage>
+            <div style={{ width: displayWidth, height: stageDisplayHeight, flexShrink: 0 }}>
+              <Stage ref={stageRef} width={displayWidth} height={stageDisplayHeight} onMouseDown={(e: any) => { if (!demoMode && e.target === e.target.getStage()) selectWidget(null); }}>
+                <Layer>
+                  <Group scaleX={scale} scaleY={scale}>
+                    {gridVisible && !demoMode && (
+                      <>
+                        {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
+                          <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
+                        ))}
+                        {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
+                          <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={gridStrokeMinor} strokeWidth={1} />
+                        ))}
+                      </>
+                    )}
+                    {widgets.filter((w: Widget) => (w.tabId || 'tab_1') === activeTabId).map((w: Widget) => (
+                      <WidgetComponent
+                        key={w.id}
+                        shapeProps={w.id === selectedId && previewWidgetColor != null ? { ...w, color: previewWidgetColor } : w}
+                        isSelected={!demoMode && w.id === selectedId}
+                        onSelect={() => selectWidget(w.id)}
+                        onChange={(attrs: any) => updateWidget(w.id, attrs)}
+                        canvasBgColor={previewCanvasColor ?? canvasConfig.color}
+                        isDemoMode={demoMode}
+                        demoDisplayValue={demoValues[w.id]}
+                        onDemoClick={demoMode ? handleDemoClick : undefined}
+                        onDemoSliderChange={demoMode ? handleDemoSliderChange : undefined}
+                        onDemoInputFocus={demoMode ? handleDemoInputFocus : undefined}
+                      />
+                    ))}
+                  </Group>
+                </Layer>
+              </Stage>
+            </div>
+            <div
+              style={{
+                height: MESSAGE_BAR_HEIGHT,
+                minHeight: MESSAGE_BAR_HEIGHT,
+                padding: '8px 10px',
+                boxSizing: 'border-box',
+                borderTop: '1px solid #64748b',
+                backgroundColor: '#f8fafc',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word', color: '#64748b' }}>—</span>
+            </div>
           </div>
         </div>
       </div>
