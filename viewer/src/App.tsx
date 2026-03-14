@@ -1012,6 +1012,8 @@ function App() {
                 gap: 10,
                 flexWrap: 'wrap',
                 flexShrink: 0,
+                borderBottomLeftRadius: 6,
+                borderBottomRightRadius: 6,
               }}
             >
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
