@@ -22,14 +22,18 @@
     "zustand": "^5.0.11"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
+    "start": "concurrently -k -n editor,viewer,proxy -c blue,green,magenta \"npm run start:editor\" \"npm run start:viewer\" \"wait-on http://127.0.0.1:3001 http://127.0.0.1:3002 -t 90000 && node server/devProxy.js\"",
+    "start:editor": "cross-env PORT=3001 BROWSER=none react-scripts start",
+    "start:viewer": "cd viewer && cross-env PORT=3002 PUBLIC_URL=/Flprog_WebUI_Editor/viewer BROWSER=none npm start",
+    "start:editor-only": "react-scripts start",
+    "build": "node scripts/set-build-date.js && react-scripts build",
     "build:with-viewer": "npm run build && node scripts/build-viewer-into-build.js",
     "test": "react-scripts test",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build",
     "deploy:with-viewer": "npm run build:with-viewer && gh-pages -d build",
-    "simulator": "node server/simulatorServer.js"
+    "simulator": "node server/simulatorServer.js",
+    "build:simulator-exe": "pkg server/simulatorServer.js --targets node18-win-x64 --output dist/FlprogSimulator.exe"
   },
   "browserslist": {
     "production": [
@@ -44,6 +48,10 @@
     ]
   },
   "devDependencies": {
-    "gh-pages": "^6.3.0"
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "gh-pages": "^6.3.0",
+    "pkg": "^5.8.1",
+    "wait-on": "^8.0.1"
   }
 }

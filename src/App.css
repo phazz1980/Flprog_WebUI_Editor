@@ -24,6 +24,12 @@
 .sidebar-left {
   left: 0;
   border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-left-build-date {
+  flex-shrink: 0;
 }
 
 .sidebar-right {
@@ -91,8 +97,70 @@
   overflow: visible;
 }
 
+.tabs-bar:has(.tabs-row) {
+  margin-bottom: 0;
+  align-items: flex-end;
+}
+
 .app-root.demo-mode .tabs-bar {
   margin-left: 0;
+  margin-bottom: 0;
+  height: auto;
+  min-height: unset;
+  align-items: flex-end;
+}
+
+.app-root.demo-mode .tabs-bar .tab-demo-exit {
+  margin-bottom: 5px;
+}
+
+.tabs-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+  min-height: 28px;
+}
+
+.tab-tab {
+  padding: 4px 12px;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid #d1d5db;
+  border-bottom: none;
+  background-color: #f3f4f6;
+  color: #4b5563;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tabs-bar:has(.tabs-row) .tab-tab {
+  background-color: var(--canvas-color, #f3f4f6);
+  color: var(--tab-text, #4b5563);
+}
+
+.tab-tab:hover {
+  background-color: #e5e7eb;
+}
+
+.tabs-bar:has(.tabs-row) .tab-tab:hover {
+  filter: brightness(1.08);
+}
+
+.tab-tab.active {
+  background-color: #ffffff;
+  color: #111827;
+  font-weight: 600;
+  margin-bottom: -3px; /* перекрывает верхний border канвы (3px) */
+  padding-bottom: 8px;
+  border-color: #475569;
+  position: relative;
+  z-index: 1;
+}
+
+.tabs-bar:has(.tabs-row) .tab-tab.active {
+  background-color: var(--canvas-color, #ffffff);
+  color: var(--tab-text, #111827);
 }
 
 .tabs-select {
@@ -104,6 +172,89 @@
   background-color: #ffffff;
   color: #111827;
   font-size: 13px;
+}
+
+/* Окно выбора вкладки (формат 9:16) — как вкладки ПК/планшета, с наездом на рамку */
+.tabs-bar:not(:has(.tabs-row)) {
+  margin-bottom: 0;
+  margin-top: 6px;
+  height: auto;
+  min-height: unset;
+  align-items: flex-end;
+  position: relative;
+  z-index: 10;
+}
+
+.tab-picker-wrap {
+  position: relative;
+}
+
+.tabs-bar:not(:has(.tabs-row)) .tab-picker-trigger {
+  padding: 4px 12px;
+  padding-bottom: 8px;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid #475569;
+  border-bottom: none;
+  background-color: var(--canvas-color, #f3f4f6);
+  color: var(--tab-text, #4b5563);
+  font-size: 13px;
+  margin-bottom: -3px;
+  position: relative;
+  z-index: 1;
+  min-height: 28px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-picker-dropdown {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 1px;
+  min-width: 100%;
+  max-width: 260px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--canvas-color, #ffffff);
+  border: 1px solid #475569;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.tab-picker-option {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tab-text, #111827);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0 4px;
+}
+
+.tab-picker-option:hover {
+  filter: brightness(0.95);
+}
+
+.tab-picker-option.active {
+  background: rgba(0, 0, 0, 0.08);
+  font-weight: 600;
+}
+
+.tabs-bar:not(:has(.tabs-row)) ~ .canvas-wrapper {
+  margin-top: 1px;
 }
 
 .tab-add-button {

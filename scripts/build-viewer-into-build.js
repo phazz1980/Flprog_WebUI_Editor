@@ -1,5 +1,5 @@
 /**
- * Собирает просмотрщик с homepage = базовый URL редактора + "/viewer",
+ * Собирает клиент с homepage = базовый URL редактора + "/viewer",
  * затем копирует viewer/build в build/viewer для совместного деплоя.
  * Запуск: после сборки редактора (npm run build), из корня репо: node scripts/build-viewer-into-build.js
  */
@@ -25,7 +25,7 @@ if (!viewerHomepage) {
 const viewerPackage = JSON.parse(fs.readFileSync(viewerPackagePath, 'utf8'));
 viewerPackage.homepage = viewerHomepage;
 fs.writeFileSync(viewerPackagePath, JSON.stringify(viewerPackage, null, 2));
-console.log('Viewer homepage:', viewerHomepage || '(не задан)');
+console.log('Client homepage:', viewerHomepage || '(не задан)');
 
 execSync('npm run build', { cwd: viewerDir, stdio: 'inherit' });
 

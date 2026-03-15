@@ -1,8 +1,8 @@
 {
-  "name": "flprog-webui-viewer",
+  "name": "flprog-webui-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Автономный просмотрщик UI для Flprog WebServer (IP, порт, подключение)",
+  "description": "Автономный клиент UI для Flprog WebServer (IP, порт, подключение)",
   "dependencies": {
     "@types/node": "^16.18.126",
     "@types/react": "^19.2.14",
@@ -17,7 +17,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "node ../scripts/set-build-date.js && react-scripts build"
   },
   "browserslist": {
     "production": [

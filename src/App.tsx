@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { generateArduinoCode } from './generator';
@@ -6,7 +6,7 @@ import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
 import { Widget } from './types';
-import { GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
+import { BUILD_DATE, GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
 
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
@@ -339,6 +339,8 @@ function App() {
   const demoInputRef = useRef<HTMLInputElement>(null);
   const [showLeftPanel, setShowLeftPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
   const [showRightPanel, setShowRightPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
+  const [tabPickerOpen, setTabPickerOpen] = useState(false);
+  const tabPickerRef = useRef<HTMLDivElement>(null);
   const prevIsMobileRef = useRef(isMobile);
   useEffect(() => {
     if (prevIsMobileRef.current !== isMobile) {
@@ -361,6 +363,17 @@ function App() {
   })();
 
   const proportionSelectValue = customProportionSelected ? 'custom' : proportionValue;
+  /** Вкладки в ряд над канвой для ПК и планшета; для мобильного — окно выбора вкладки */
+  const tabsInRow = proportionValue === 'pc' || proportionValue === 'tablet';
+
+  useLayoutEffect(() => {
+    if (!tabPickerOpen) return;
+    const handle = (e: MouseEvent) => {
+      if (tabPickerRef.current && !tabPickerRef.current.contains(e.target as Node)) setTabPickerOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [tabPickerOpen]);
 
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
   const ratioDisplay = (() => {
@@ -710,7 +723,6 @@ function App() {
         </button>
 
         <h3 style={{ marginTop: '30px' }}>Canvas</h3>
-        <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>Соотношение сторон (логич. ед., не зависят от PPI)</p>
         <label style={{ fontSize: '12px' }}>Пропорции:</label>
         <select
           value={proportionSelectValue}
@@ -725,27 +737,21 @@ function App() {
             const [rW, rH] = (v === 'pc' || v === 'tablet' || v === 'mobile') ? RATIOS[v] : [16, 9];
             let newWidth: number;
             let newHeight: number;
-            if (v === 'mobile') {
-              // Мобильный (9:16): уменьшенные логические размеры, чтобы при 100% помещалось в экран
-              const MOBILE_FIT_FACTOR = 0.85; // запас по краям
-              const maxW = (viewportW - 24) * MOBILE_FIT_FACTOR;
-              const maxH = Math.max(20, (viewportH - VIEWPORT_HEIGHT_MARGIN) * MOBILE_FIT_FACTOR);
-              const widthIfLimitByH = (maxH * rW) / rH;
-              if (widthIfLimitByH <= maxW) {
-                newHeight = snapToGrid(Math.round(maxH));
-                newWidth = snapToGrid(Math.round((newHeight * rW) / rH));
-              } else {
-                newWidth = snapToGrid(Math.round(maxW));
-                newHeight = snapToGrid(Math.round((newWidth * rH) / rW));
-              }
+            // Для ПК, планшета и мобильного — одна плотность: логические размеры подгоняем под viewport
+            const FIT_FACTOR = 0.85; // запас по краям
+            const maxW = (viewportW - 24) * FIT_FACTOR;
+            const maxH = Math.max(20, (viewportH - VIEWPORT_HEIGHT_MARGIN) * FIT_FACTOR);
+            const widthIfLimitByH = (maxH * rW) / rH;
+            if (widthIfLimitByH <= maxW) {
+              newHeight = snapToGrid(Math.round(maxH));
+              newWidth = snapToGrid(Math.round((newHeight * rW) / rH));
             } else {
-              const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
-              newWidth = rW >= rH ? maxCurrent : Math.round(maxCurrent * rW / rH);
-              newHeight = rW >= rH ? Math.round(maxCurrent * rH / rW) : maxCurrent;
+              newWidth = snapToGrid(Math.round(maxW));
+              newHeight = snapToGrid(Math.round((newWidth * rH) / rW));
             }
             updateCanvas({ width: newWidth, height: newHeight });
           }}
-          style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
+          style={{ width: '100%', marginBottom: '8px', padding: '4px 8px', boxSizing: 'border-box' }}
         >
           <option value="pc">ПК (16:9)</option>
           <option value="tablet">Планшет (4:3)</option>
@@ -771,7 +777,7 @@ function App() {
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
+              style={{ width: '100%', marginBottom: '8px', padding: '4px 8px', boxSizing: 'border-box' }}
             />
           </>
         )}
@@ -785,7 +791,19 @@ function App() {
           onBlur={commitCanvasColor}
           style={{ width: '100%' }}
         />
-        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', cursor: 'pointer', backgroundColor: '#000', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}>Generate Code</button>
+        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}>Generate Code</button>
+        <a
+          href={`${process.env.PUBLIC_URL || ''}/viewer/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: '10px', padding: '12px', boxSizing: 'border-box', textAlign: 'center', cursor: 'pointer', backgroundColor: '#e5e7eb', color: '#374151', border: '1px solid #d1d5db', borderRadius: '4px', fontWeight: 'bold', textDecoration: 'none', minHeight: 44 }}
+          title="Открыть Flprog WebUI Client (подключение к устройству по IP)"
+        >
+          Открыть клиент
+        </a>
+        <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
+          Сборка: {BUILD_DATE}
+        </p>
       </div>
       )}
 
@@ -797,12 +815,60 @@ function App() {
           transition: 'margin 0.2s ease',
         }}
       >
-        <div className="tabs-bar">
-          <select className="tabs-select" value={activeTabId} onChange={(e) => setActiveTab(e.target.value)}>
-            {tabs.map((tab) => (
-              <option key={tab.id} value={tab.id}>{tab.name}</option>
-            ))}
-          </select>
+        <div
+          className="tabs-bar"
+          style={{
+            ['--canvas-color' as string]: previewCanvasColor ?? canvasConfig.color,
+            ['--tab-text' as string]: contrastColor(previewCanvasColor ?? canvasConfig.color),
+          }}
+        >
+          {tabsInRow ? (
+            <div className="tabs-row" role="tablist">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.id === activeTabId}
+                  className={`tab-tab ${tab.id === activeTabId ? 'active' : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="tab-picker-wrap" ref={tabPickerRef}>
+              <button
+                type="button"
+                className="tabs-select tab-picker-trigger"
+                onClick={() => setTabPickerOpen((v) => !v)}
+                aria-expanded={tabPickerOpen}
+                aria-haspopup="listbox"
+              >
+                {tabs.find((t) => t.id === activeTabId)?.name ?? 'Вкладка'}
+              </button>
+              {tabPickerOpen && (
+                <div className="tab-picker-dropdown" role="listbox">
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="option"
+                      aria-selected={tab.id === activeTabId}
+                      className={`tab-picker-option ${tab.id === activeTabId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                        setTabPickerOpen(false);
+                      }}
+                    >
+                      {tab.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {demoMode ? (
             <button
               type="button"
@@ -864,16 +930,6 @@ function App() {
           >
             Демо
           </button>
-          <a
-            href={`${process.env.PUBLIC_URL || ''}/viewer/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="tab-rename-button"
-            style={{ marginLeft: '8px', textDecoration: 'none', color: 'inherit' }}
-            title="Открыть просмотрщик интерфейса (подключение к устройству по IP)"
-          >
-            Просмотр
-          </a>
             </>
           )}
         </div>
@@ -884,7 +940,7 @@ function App() {
           </>
         )}
 
-        <div style={{ width: displayWidth, flexShrink: 0 }}>
+        <div className="canvas-wrapper" style={{ width: displayWidth, flexShrink: 0 }}>
           <div
             className="canvas-inner"
             style={{
@@ -1256,7 +1312,7 @@ function App() {
               </button>
               {simulatorSuccess && (
                 <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#059669' }}>
-                  Проект загружен. Подключите просмотрщик к <a href={SIMULATOR_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>{SIMULATOR_URL}</a>
+                  Проект загружен. Подключите клиент к <a href={SIMULATOR_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>{SIMULATOR_URL}</a>
                 </p>
               )}
               {simulatorError && (

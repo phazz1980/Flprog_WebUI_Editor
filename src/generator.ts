@@ -199,7 +199,7 @@ ${configJson}
 ${globalVars}
 ${hasSoundEnabledWidget ? '' : 'byte sound_enabled; // in, 0=выкл 1=уведомление 2=тревога\n'}
 String ui_message; // in
-bool alarm_reset = false; // выход сброса аварии: установите в true в своей логике для сброса сообщения и звука
+bool alarm_reset = false; //out // выход сброса аварии: установите в true в своей логике для сброса сообщения и звука
 
 void setup() {
   Serial.begin(115200);

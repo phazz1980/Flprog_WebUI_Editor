@@ -12,6 +12,16 @@ import './App.css';
 
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
+
+/** Дата сборки (REACT_APP_BUILD_DATE при сборке, иначе текущая дата в dev). */
+const BUILD_DATE = (() => {
+  const s = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
+  if (s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
+  }
+  return new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+})();
 const CANVAS_PANEL_GAP = 28;
 /** Отступ слева, когда левая панель скрыта, чтобы канва не заезжала на кнопку «☰». */
 const LEFT_TOGGLE_OFFSET = 48;
@@ -21,17 +31,21 @@ const POLL_INTERVAL_MS_MAX = 30000;
 const STORAGE_KEY_ADDRESS = 'flprog_viewer_address';
 const STORAGE_KEY_POLL_INTERVAL = 'flprog_viewer_poll_interval';
 
+/** Адрес эмулятора по умолчанию (npm run simulator) */
+const DEFAULT_EMULATOR_HOST = 'localhost';
+const DEFAULT_EMULATOR_PORT = '31337';
+
 function loadSavedAddress(): { ip: string; port: string } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_ADDRESS);
-    if (!raw) return { ip: '192.168.1.1', port: '80' };
+    if (!raw) return { ip: DEFAULT_EMULATOR_HOST, port: DEFAULT_EMULATOR_PORT };
     const parsed = JSON.parse(raw);
     return {
-      ip: typeof parsed?.ip === 'string' ? parsed.ip : '192.168.1.1',
-      port: typeof parsed?.port === 'string' ? parsed.port : '80',
+      ip: typeof parsed?.ip === 'string' ? parsed.ip : DEFAULT_EMULATOR_HOST,
+      port: typeof parsed?.port === 'string' ? parsed.port : DEFAULT_EMULATOR_PORT,
     };
   } catch {
-    return { ip: '192.168.1.1', port: '80' };
+    return { ip: DEFAULT_EMULATOR_HOST, port: DEFAULT_EMULATOR_PORT };
   }
 }
 
@@ -77,8 +91,8 @@ function getUrlParams(): { host?: string; port?: string; connect: boolean } {
 /** Разбирает поле IP: допускается "host", "host:port" или полный URL (http://host:port, https://host). */
 function parseHostPort(ipVal: string, portVal: string): { host: string; port: string; scheme: 'http' | 'https' } {
   const trimmed = ipVal.trim();
-  const fallbackPort = portVal.trim() || '80';
-  if (!trimmed) return { host: '192.168.1.1', port: fallbackPort, scheme: 'http' };
+  const fallbackPort = portVal.trim() || DEFAULT_EMULATOR_PORT;
+  if (!trimmed) return { host: DEFAULT_EMULATOR_HOST, port: fallbackPort, scheme: 'http' };
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       const url = new URL(trimmed);
@@ -339,6 +353,7 @@ function App() {
   const [configJsonString, setConfigJsonString] = useState<string | null>(null);
   const [showConfigJson, setShowConfigJson] = useState(false);
   const [debugClicks, setDebugClicks] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [draggingSliderId, setDraggingSliderId] = useState<string | null>(null);
   const [localSliderValues, setLocalSliderValues] = useState<Record<string, number>>({});
   const [sliderRevertOverrides, setSliderRevertOverrides] = useState<Record<string, string>>({});
@@ -355,12 +370,35 @@ function App() {
   const [inputOverlayValue, setInputOverlayValue] = useState('');
 
   const prevUiMessageRef = useRef<string>('');
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setShowDebugPanel((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
   const [soundOffForCurrentMessage, setSoundOffForCurrentMessage] = useState(false);
   const [messageClearedByUser, setMessageClearedByUser] = useState(false);
+  const [tabPickerOpen, setTabPickerOpen] = useState(false);
+  const tabPickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!tabPickerOpen) return;
+    const close = (e: MouseEvent) => {
+      if (tabPickerRef.current && !tabPickerRef.current.contains(e.target as Node)) setTabPickerOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [tabPickerOpen]);
 
   const RECONNECT_DELAY_MS = 3000;
 
   const disconnect = useCallback(() => {
+    stopAlarm();
     setAutoReconnect(false);
     setConnected(false);
     setConnecting(false);
@@ -447,6 +485,7 @@ function App() {
       try {
         const res = await fetch(`${base}/state?fmt=short`);
         if (!res.ok) {
+          stopAlarm();
           setError('Соединение потеряно');
           setConnected(false);
           return;
@@ -454,6 +493,7 @@ function App() {
         const data = await res.json();
         setState(data);
       } catch {
+        stopAlarm();
         setError('Соединение потеряно');
         setConnected(false);
       }
@@ -534,16 +574,20 @@ function App() {
 
   const MESSAGE_BAR_HEIGHT = 44;
   const sidebarOffset = !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET;
-  const availableW = Math.max(100, viewportW - sidebarOffset - 40);
+  const availableW = isMobile ? Math.max(100, viewportW - 2) : Math.max(100, viewportW - sidebarOffset - 40);
   const availableH = Math.max(100, viewportH - 67);
   const baseScale = canvasWidth > 0 && canvasHeight > 0
-    ? Math.min(availableW / canvasWidth, availableH / canvasHeight)
+    ? (isMobile ? availableW / canvasWidth : Math.min(availableW / canvasWidth, availableH / canvasHeight))
     : 1;
   const scale = baseScale;
   const displayWidth = Math.round(canvasWidth * scale);
   const displayHeight = Math.round(canvasHeight * scale);
   const CANVAS_BORDER = 3;
   const stageDisplayHeight = displayHeight - MESSAGE_BAR_HEIGHT - CANVAS_BORDER * 2;
+
+  /** Вкладки в ряд над канвой для ПК/планшета (16:9, 4:3); для мобильного (9:16) — выпадающий список */
+  const canvasRatio = canvasWidth > 0 && canvasHeight > 0 ? canvasWidth / canvasHeight : 0;
+  const isPcOrTablet = Math.abs(canvasRatio - 16 / 9) < 0.02 || Math.abs(canvasRatio - 4 / 3) < 0.02;
 
   const stageRef = useRef<Konva.Stage>(null);
   const handleStagePointerDown = useCallback(
@@ -776,8 +820,8 @@ function App() {
           type="text"
           value={ip}
           onChange={(e) => setIp(e.target.value)}
-          onBlur={() => saveAddress(ip.trim() || '192.168.1.1', port.trim() || '80')}
-          placeholder="192.168.1.1, localhost:31337 или http://host:port"
+          onBlur={() => saveAddress(ip.trim() || DEFAULT_EMULATOR_HOST, port.trim() || DEFAULT_EMULATOR_PORT)}
+          placeholder="localhost:31337, 192.168.1.1 или http://host:port"
           style={{ width: '100%', marginBottom: 10, padding: '6px 8px', boxSizing: 'border-box' }}
         />
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Порт (если не указан в адресе)</label>
@@ -785,8 +829,8 @@ function App() {
           type="text"
           value={port}
           onChange={(e) => setPort(e.target.value)}
-          onBlur={() => saveAddress(ip.trim() || '192.168.1.1', port.trim() || '80')}
-          placeholder="80"
+          onBlur={() => saveAddress(ip.trim() || DEFAULT_EMULATOR_HOST, port.trim() || DEFAULT_EMULATOR_PORT)}
+          placeholder="31337"
           style={{ width: '100%', marginBottom: 12, padding: '6px 8px', boxSizing: 'border-box' }}
         />
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Интервал обновления (мс)</label>
@@ -830,53 +874,64 @@ function App() {
             Повтор через {reconnectCountdown} сек
           </p>
         )}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={debugClicks}
-            onChange={(e) => setDebugClicks(e.target.checked)}
-          />
-          Отладка кликов (в консоль F12)
-        </label>
-        {connected && configJsonString != null && (
-          <div style={{ marginTop: 16, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
-            <button
-              type="button"
-              onClick={() => setShowConfigJson((v) => !v)}
-              style={{
-                width: '100%',
-                padding: '6px 8px',
-                fontSize: 12,
-                textAlign: 'left',
-                border: '1px solid #d1d5db',
-                borderRadius: 4,
-                background: '#f9fafb',
-                cursor: 'pointer',
-              }}
-            >
-              {showConfigJson ? '▼ Скрыть' : '▶ Показать'} принятый JSON
-            </button>
-            {showConfigJson && (
-              <pre
-                style={{
-                  marginTop: 8,
-                  padding: 8,
-                  fontSize: 11,
-                  fontFamily: 'ui-monospace, monospace',
-                  background: '#f1f5f9',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 4,
-                  maxHeight: 280,
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {configJsonString}
-              </pre>
+        {showDebugPanel ? (
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={debugClicks}
+                onChange={(e) => setDebugClicks(e.target.checked)}
+              />
+              Отладка кликов (в консоль F12)
+            </label>
+            {connected && configJsonString != null && (
+              <div style={{ marginTop: 16, borderTop: '1px solid #e5e7eb', paddingTop: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigJson((v) => !v)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    fontSize: 12,
+                    textAlign: 'left',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 4,
+                    background: '#f9fafb',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showConfigJson ? '▼ Скрыть' : '▶ Показать'} принятый JSON
+                </button>
+                {showConfigJson && (
+                  <pre
+                    style={{
+                      marginTop: 8,
+                      padding: 8,
+                      fontSize: 11,
+                      fontFamily: 'ui-monospace, monospace',
+                      background: '#f1f5f9',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 4,
+                      maxHeight: 280,
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {configJsonString}
+                  </pre>
+                )}
+              </div>
             )}
-          </div>
+          </>
+        ) : (
+          <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 12 }}>
+            Ctrl+Alt+D — отладка
+          </p>
         )}
+        <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
+          Сборка: {BUILD_DATE}
+        </p>
       </div>
 
       <button
@@ -890,23 +945,65 @@ function App() {
       <div
         className="canvas-container"
         style={{
-          marginLeft: !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET,
+          marginLeft: isMobile ? 0 : (showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
           transition: 'margin 0.2s ease',
         }}
         onPointerDownCapture={handleCanvasContainerPointerDown}
       >
-        <div className="tabs-bar">
-          {tabIds.length > 0 && (
-            <select
-              className="tabs-select"
-              value={activeTabId}
-              onChange={(e) => setActiveTabIndex(tabIds.indexOf(e.target.value))}
-            >
+        <div
+          className="tabs-bar"
+          style={tabIds.length > 0 ? {
+            ['--canvas-color' as string]: canvasColor,
+            ['--tab-text' as string]: contrastColor(canvasColor),
+          } : undefined}
+        >
+          {tabIds.length > 0 && (isPcOrTablet ? (
+            <div className="tabs-row" role="tablist">
               {tabIds.map((tid, i) => (
-                <option key={tid} value={tid}>{tabNames[i] ?? `Вкладка ${i + 1}`}</option>
+                <button
+                  key={tid}
+                  type="button"
+                  role="tab"
+                  aria-selected={tid === activeTabId}
+                  className={`tab-tab ${tid === activeTabId ? 'active' : ''}`}
+                  onClick={() => setActiveTabIndex(i)}
+                >
+                  {tabNames[i] ?? `Вкладка ${i + 1}`}
+                </button>
               ))}
-            </select>
-          )}
+            </div>
+          ) : (
+            <div className="tab-picker-wrap" ref={tabPickerRef}>
+              <button
+                type="button"
+                className="tabs-select tab-picker-trigger"
+                onClick={() => setTabPickerOpen((v) => !v)}
+                aria-expanded={tabPickerOpen}
+                aria-haspopup="listbox"
+              >
+                {tabNames[tabIds.indexOf(activeTabId)] ?? tabNames[0] ?? 'Вкладка'}
+              </button>
+              {tabPickerOpen && (
+                <div className="tab-picker-dropdown" role="listbox">
+                  {tabIds.map((tid, i) => (
+                    <button
+                      key={tid}
+                      type="button"
+                      role="option"
+                      aria-selected={tid === activeTabId}
+                      className={`tab-picker-option ${tid === activeTabId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveTabIndex(i);
+                        setTabPickerOpen(false);
+                      }}
+                    >
+                      {tabNames[i] ?? `Вкладка ${i + 1}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
         <div style={{ width: displayWidth, flexShrink: 0 }}>
           <div

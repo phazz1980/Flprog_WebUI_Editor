@@ -6,6 +6,7 @@
 
 const http = require('http');
 const url = require('url');
+const { exec } = require('child_process');
 
 const PORT = process.env.SIMULATOR_PORT || 31337;
 
@@ -598,7 +599,18 @@ const server = http.createServer((req, res) => {
   res.end('<!DOCTYPE HTML><html><body><h1>404 Not Found</h1><a href="/">Home</a></body></html>');
 });
 
+function openBrowser(addr) {
+  const cmd = process.platform === 'win32' ? `start "" "${addr}"`
+    : process.platform === 'darwin' ? `open "${addr}"`
+    : `xdg-open "${addr}"`;
+  exec(cmd, (err) => {
+    if (err) console.warn('Не удалось открыть браузер:', err.message);
+  });
+}
+
 server.listen(PORT, () => {
-  console.log(`ESP Simulator: http://localhost:${PORT}`);
+  const addr = `http://localhost:${PORT}`;
+  console.log(`ESP Simulator: ${addr}`);
   console.log('POST /load with { widgets, canvasConfig } to load project, then use /config, /state, /set, /ping');
+  openBrowser(addr);
 });
