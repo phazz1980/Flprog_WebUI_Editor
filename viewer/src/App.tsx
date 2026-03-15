@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Circle, Group, Layer as KonvaLayer, Rect, Stage as KonvaStage, Text } from 'react-konva';
 import Konva from 'konva';
 import { contrastColor } from './contrastColor';
@@ -352,6 +353,7 @@ function App() {
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [configJsonString, setConfigJsonString] = useState<string | null>(null);
   const [showConfigJson, setShowConfigJson] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [debugClicks, setDebugClicks] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [draggingSliderId, setDraggingSliderId] = useState<string | null>(null);
@@ -385,11 +387,27 @@ function App() {
   const [messageClearedByUser, setMessageClearedByUser] = useState(false);
   const [tabPickerOpen, setTabPickerOpen] = useState(false);
   const tabPickerRef = useRef<HTMLDivElement>(null);
+  const tabPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabPickerDropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!tabPickerOpen || !tabPickerTriggerRef.current) {
+      setDropdownPosition(null);
+      return;
+    }
+    const rect = tabPickerTriggerRef.current.getBoundingClientRect();
+    setDropdownPosition({ top: rect.bottom, left: rect.left, width: rect.width });
+  }, [tabPickerOpen]);
 
   useEffect(() => {
     if (!tabPickerOpen) return;
     const close = (e: MouseEvent) => {
-      if (tabPickerRef.current && !tabPickerRef.current.contains(e.target as Node)) setTabPickerOpen(false);
+      const target = e.target as Node;
+      if (
+        !tabPickerRef.current?.contains(target) &&
+        !tabPickerDropdownRef.current?.contains(target)
+      ) setTabPickerOpen(false);
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
@@ -814,7 +832,17 @@ function App() {
   return (
     <div className="App app-root">
       <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
-        <h3 style={{ marginTop: 25, marginBottom: 12 }}>Подключение</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 25, marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Подключение</h3>
+          <button
+            type="button"
+            onClick={() => setShowHelp(true)}
+            title="Справка"
+            style={{ padding: '4px 10px', fontSize: 14, fontWeight: 600, cursor: 'pointer', border: '1px solid #d1d5db', borderRadius: 4, background: '#f9fafb' }}
+          >
+            ?
+          </button>
+        </div>
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Адрес (IP или host:port)</label>
         <input
           type="text"
@@ -930,7 +958,7 @@ function App() {
           </p>
         )}
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Сборка: {BUILD_DATE}
+          Flprog Web UI Client · Сборка: {BUILD_DATE}
         </p>
       </div>
 
@@ -975,6 +1003,7 @@ function App() {
           ) : (
             <div className="tab-picker-wrap" ref={tabPickerRef}>
               <button
+                ref={tabPickerTriggerRef}
                 type="button"
                 className="tabs-select tab-picker-trigger"
                 onClick={() => setTabPickerOpen((v) => !v)}
@@ -983,8 +1012,20 @@ function App() {
               >
                 {tabNames[tabIds.indexOf(activeTabId)] ?? tabNames[0] ?? 'Вкладка'}
               </button>
-              {tabPickerOpen && (
-                <div className="tab-picker-dropdown" role="listbox">
+              {tabPickerOpen && dropdownPosition && createPortal(
+                <div
+                  ref={tabPickerDropdownRef}
+                  className="tab-picker-dropdown tab-picker-dropdown-portal"
+                  role="listbox"
+                  style={{
+                    position: 'fixed',
+                    top: dropdownPosition.top,
+                    left: dropdownPosition.left,
+                    minWidth: dropdownPosition.width,
+                    backgroundColor: canvasColor,
+                    color: contrastColor(canvasColor),
+                  }}
+                >
                   {tabIds.map((tid, i) => (
                     <button
                       key={tid}
@@ -1000,7 +1041,8 @@ function App() {
                       {tabNames[i] ?? `Вкладка ${i + 1}`}
                     </button>
                   ))}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           ))}
@@ -1162,6 +1204,24 @@ function App() {
           </div>
         </div>
       </div>
+
+      {showHelp && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'white', width: '90%', maxWidth: 560, maxHeight: '85%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <h3 style={{ margin: 0 }}>Справка — Просмотрщик</h3>
+              <button onClick={() => setShowHelp(false)} style={{ padding: '6px 12px', cursor: 'pointer' }}>Закрыть</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', fontSize: '14px', lineHeight: 1.5 }}>
+              <p><strong>Подключение.</strong> Введите IP и порт устройства с прошивкой Flprog WebServer (или <code>localhost:31337</code> для симулятора). Формат: <code>192.168.1.1</code>, <code>host:port</code> или <code>http://host:port</code>. Кнопка «Подключиться» загружает конфиг и начинает опрос состояния.</p>
+              <p><strong>Вкладки.</strong> Переключайте экраны по вкладкам, как в редакторе.</p>
+              <p><strong>Управление.</strong> Кнопки и переключатели отправляют команды на устройство. Слайдер и поле ввода — при изменении значения. LED и метки отображают данные с устройства.</p>
+              <p><strong>Звук.</strong> Поддерживаются уведомление и тревога. При тревоге доступна кнопка «Выключить тревогу».</p>
+              <p><strong>Интервал обновления.</strong> Частота опроса состояния (мс). Можно уменьшить для быстрого отклика или увеличить для экономии трафика.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

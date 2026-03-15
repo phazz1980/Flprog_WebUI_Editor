@@ -77,7 +77,8 @@ export function displayValue(
   }
 
   if (type === 'input' || type === 'label') return String(rawValue);
-  if (type === 'button') return rawValue === 1 || rawValue === '1' || rawValue === true ? '1' : fallbackText;
+  // Кнопка всегда показывает статичную надпись (widget.text), значение 0/1 только уходит на бэкенд
+  if (type === 'button') return fallbackText;
 
   return fallbackText;
 }

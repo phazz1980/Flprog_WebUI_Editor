@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { generateArduinoCode } from './generator';
@@ -327,11 +328,15 @@ function App() {
   const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const [showCode, setShowCode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
   const SIMULATOR_URL = 'http://localhost:31337';
+/** Ссылка на вьювер на GitHub Pages (для кнопки «Открыть клиент» и подсказок). */
+const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor/viewer';
   const [simulatorLoading, setSimulatorLoading] = useState(false);
   const [simulatorError, setSimulatorError] = useState<string | null>(null);
   const [simulatorSuccess, setSimulatorSuccess] = useState(false);
+  const [simulatorOnline, setSimulatorOnline] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [demoValues, setDemoValues] = useState<Record<string, string>>({});
   const [demoEditingInputId, setDemoEditingInputId] = useState<string | null>(null);
@@ -341,6 +346,9 @@ function App() {
   const [showRightPanel, setShowRightPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
   const [tabPickerOpen, setTabPickerOpen] = useState(false);
   const tabPickerRef = useRef<HTMLDivElement>(null);
+  const tabPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabPickerDropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const prevIsMobileRef = useRef(isMobile);
   useEffect(() => {
     if (prevIsMobileRef.current !== isMobile) {
@@ -367,9 +375,22 @@ function App() {
   const tabsInRow = proportionValue === 'pc' || proportionValue === 'tablet';
 
   useLayoutEffect(() => {
+    if (!tabPickerOpen || !tabPickerTriggerRef.current) {
+      setDropdownPosition(null);
+      return;
+    }
+    const rect = tabPickerTriggerRef.current.getBoundingClientRect();
+    setDropdownPosition({ top: rect.bottom, left: rect.left, width: rect.width });
+  }, [tabPickerOpen]);
+
+  useEffect(() => {
     if (!tabPickerOpen) return;
     const handle = (e: MouseEvent) => {
-      if (tabPickerRef.current && !tabPickerRef.current.contains(e.target as Node)) setTabPickerOpen(false);
+      const target = e.target as Node;
+      if (
+        !tabPickerRef.current?.contains(target) &&
+        !tabPickerDropdownRef.current?.contains(target)
+      ) setTabPickerOpen(false);
     };
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
@@ -518,6 +539,22 @@ function App() {
       setSimulatorLoading(false);
     }
   }, [widgets, canvasConfig]);
+
+  // Проверка доступности симулятора при открытой панели кода
+  useEffect(() => {
+    if (!showCode) {
+      setSimulatorOnline(false);
+      return;
+    }
+    const check = () => {
+      fetch(`${SIMULATOR_URL}/ping`, { method: 'GET' })
+        .then((r) => setSimulatorOnline(r.ok))
+        .catch(() => setSimulatorOnline(false));
+    };
+    check();
+    const t = setInterval(check, 3000);
+    return () => clearInterval(t);
+  }, [showCode]);
 
   const enterDemoMode = () => {
     const initial: Record<string, string> = {};
@@ -698,31 +735,31 @@ function App() {
       <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowLeftPanel(false)}>×</button>
         <div style={{ marginBottom: '8px', paddingRight: '44px', paddingLeft: '44px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Widgets</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Виджеты</h3>
         </div>
         <button className="widget-button" onClick={() => addWidget('button')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🔘</span><span>Add Button</span>
+          <span className="widget-icon">🔘</span><span>Кнопка</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('switch')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">⏽</span><span>Add Switch</span>
+          <span className="widget-icon">⏽</span><span>Переключатель</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('slider')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🎚</span><span>Add Slider</span>
+          <span className="widget-icon">🎚</span><span>Слайдер</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('input')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">⌨</span><span>Add Input</span>
+          <span className="widget-icon">⌨</span><span>Поле ввода</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('led')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#f43f5e', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">💡</span><span>Add LED</span>
+          <span className="widget-icon">💡</span><span>Светодиод</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('label')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🔤</span><span>Add Label</span>
+          <span className="widget-icon">🔤</span><span>Надпись</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('rect')} style={{ width: '100%', padding: '10px', cursor: 'pointer', backgroundColor: '#64748b', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">▭</span><span>Add Rectangle</span>
+          <span className="widget-icon">▭</span><span>Прямоугольник</span>
         </button>
 
-        <h3 style={{ marginTop: '30px' }}>Canvas</h3>
+        <h3 style={{ marginTop: '30px' }}>Канва</h3>
         <label style={{ fontSize: '12px' }}>Пропорции:</label>
         <select
           value={proportionSelectValue}
@@ -791,18 +828,18 @@ function App() {
           onBlur={commitCanvasColor}
           style={{ width: '100%' }}
         />
-        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}>Generate Code</button>
+        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}>Сгенерировать код</button>
         <a
-          href={`${process.env.PUBLIC_URL || ''}/viewer/`}
+          href={VIEWER_GITHUB_PAGES_URL}
           target="_blank"
           rel="noopener noreferrer"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: '10px', padding: '12px', boxSizing: 'border-box', textAlign: 'center', cursor: 'pointer', backgroundColor: '#e5e7eb', color: '#374151', border: '1px solid #d1d5db', borderRadius: '4px', fontWeight: 'bold', textDecoration: 'none', minHeight: 44 }}
-          title="Открыть Flprog WebUI Client (подключение к устройству по IP)"
+          title="Открыть вьювер на GitHub Pages (подключение к устройству по IP)"
         >
           Открыть клиент
         </a>
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Сборка: {BUILD_DATE}
+          Flprog Web UI · Сборка: {BUILD_DATE}
         </p>
       </div>
       )}
@@ -840,6 +877,7 @@ function App() {
           ) : (
             <div className="tab-picker-wrap" ref={tabPickerRef}>
               <button
+                ref={tabPickerTriggerRef}
                 type="button"
                 className="tabs-select tab-picker-trigger"
                 onClick={() => setTabPickerOpen((v) => !v)}
@@ -848,8 +886,20 @@ function App() {
               >
                 {tabs.find((t) => t.id === activeTabId)?.name ?? 'Вкладка'}
               </button>
-              {tabPickerOpen && (
-                <div className="tab-picker-dropdown" role="listbox">
+              {tabPickerOpen && dropdownPosition && createPortal(
+                <div
+                  ref={tabPickerDropdownRef}
+                  className="tab-picker-dropdown tab-picker-dropdown-portal"
+                  role="listbox"
+                  style={{
+                    position: 'fixed',
+                    top: dropdownPosition.top,
+                    left: dropdownPosition.left,
+                    minWidth: dropdownPosition.width,
+                    backgroundColor: previewCanvasColor ?? canvasConfig.color,
+                    color: contrastColor(previewCanvasColor ?? canvasConfig.color),
+                  }}
+                >
                   {tabs.map((tab) => (
                     <button
                       key={tab.id}
@@ -865,7 +915,8 @@ function App() {
                       {tab.name}
                     </button>
                   ))}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           )}
@@ -885,7 +936,7 @@ function App() {
             onClick={() => {
               const current = tabs.find((t) => t.id === activeTabId);
               if (!current) return;
-              const nextName = window.prompt('Tab name', current.name);
+              const nextName = window.prompt('Имя вкладки', current.name);
               if (nextName && nextName.trim()) renameTab(current.id, nextName.trim());
             }}
           >
@@ -929,6 +980,14 @@ function App() {
             title="Режим демонстрации"
           >
             Демо
+          </button>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={() => setShowHelp(true)}
+            title="Справка"
+          >
+            ?
           </button>
             </>
           )}
@@ -1042,7 +1101,7 @@ function App() {
         <button className="mobile-sidebar-close" onClick={() => setShowRightPanel(false)}>×</button>
         <div className="sidebar-right-content">
         <div style={{ marginBottom: '8px', paddingRight: '44px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Properties</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Свойства</h3>
         </div>
         {selectedId ? (
           <div>
@@ -1208,7 +1267,7 @@ function App() {
                   )}
                   {!((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
                     <>
-                      <label style={{ fontSize: '12px' }}>Variable Name:</label>
+                      <label style={{ fontSize: '12px' }}>Имя переменной:</label>
                       <input
                         type="text"
                         value={selectedWidget.varName || ''}
@@ -1219,24 +1278,24 @@ function App() {
                   )}
                   {!isBoolLocked && !((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
                     <>
-                      <label style={{ fontSize: '12px' }}>Type:</label>
+                      <label style={{ fontSize: '12px' }}>Тип:</label>
                       <select
                         value={selectedWidget.varType || 'int'}
                         onChange={(e) => updateWidget(selectedId, { varType: e.target.value as any })}
                         style={{ width: '100%', marginBottom: '10px' }}
                       >
-                        <option value="int">int</option>
-                        <option value="float">float</option>
-                        <option value="bool">bool</option>
-                        <option value="byte">Byte</option>
-                        <option value="String">String</option>
+                        <option value="int">int (целое)</option>
+                        <option value="float">float (дробное)</option>
+                        <option value="bool">bool (логич.)</option>
+                        <option value="byte">byte (байт)</option>
+                        <option value="String">String (строка)</option>
                       </select>
                     </>
                   )}
                 </>
               );
             })()}
-            <label style={{ fontSize: '12px' }}>Color:</label>
+            <label style={{ fontSize: '12px' }}>Цвет:</label>
             <input
               ref={widgetColorRef}
               type="color"
@@ -1247,12 +1306,12 @@ function App() {
               style={{ width: '100%', marginBottom: '10px' }}
             />
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
-              <button onClick={() => bringToFront(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>To Front</button>
-              <button onClick={() => sendToBack(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>To Back</button>
+              <button onClick={() => bringToFront(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>На передний план</button>
+              <button onClick={() => sendToBack(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>На задний план</button>
             </div>
-            <button onClick={() => removeWidget(selectedId)} style={{ width: '100%', padding: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Delete</button>
+            <button onClick={() => removeWidget(selectedId)} style={{ width: '100%', padding: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Удалить</button>
           </div>
-        ) : <p>Select a widget</p>}
+        ) : <p>Выберите виджет</p>}
         </div>
         <div className="sidebar-right-footer">
           <button
@@ -1274,12 +1333,12 @@ function App() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', width: '80%', height: '80%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <h3>Code Preview</h3>
-              <button onClick={() => setShowCode(false)}>Close</button>
+              <h3>Предпросмотр кода</h3>
+              <button onClick={() => setShowCode(false)}>Закрыть</button>
             </div>
             <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs)} style={{ flex: 1, fontFamily: 'monospace' }} />
             <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Download .ino</button>
+              <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Скачать .ino</button>
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
                 onClick={() => {
@@ -1295,36 +1354,55 @@ function App() {
                 }}
                 style={{ padding: '10px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px' }}
               >
-                Copy
+                Копировать
               </button>
             </div>
-            <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
-              <div style={{ fontWeight: 600, marginBottom: '6px' }}>Симулятор ESP</div>
-              <p style={{ fontSize: '12px', margin: '0 0 8px 0', color: '#6b7280' }}>
-                Запустите в отдельном терминале: <code style={{ background: '#e5e7eb', padding: '2px 6px', borderRadius: '4px' }}>npm run simulator</code>
-              </p>
-              <button
-                onClick={sendToSimulator}
-                disabled={simulatorLoading}
-                style={{ padding: '8px 12px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: simulatorLoading ? 'wait' : 'pointer' }}
-              >
-                {simulatorLoading ? 'Отправка…' : 'Отправить проект в симулятор'}
-              </button>
-              {simulatorSuccess && (
-                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#059669' }}>
-                  Проект загружен. Подключите клиент к <a href={SIMULATOR_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>{SIMULATOR_URL}</a>
-                </p>
-              )}
-              {simulatorError && (
-                <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#dc2626' }}>{simulatorError}</p>
-              )}
+            {simulatorOnline && (
+              <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                <div style={{ fontWeight: 600, marginBottom: '6px' }}>Симулятор ESP</div>
+                <button
+                  onClick={sendToSimulator}
+                  disabled={simulatorLoading}
+                  style={{ padding: '8px 12px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: simulatorLoading ? 'wait' : 'pointer' }}
+                >
+                  {simulatorLoading ? 'Отправка…' : 'Отправить проект в симулятор'}
+                </button>
+                {simulatorSuccess && (
+                  <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#059669' }}>
+                    Проект загружен. Откройте <a href={VIEWER_GITHUB_PAGES_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>вьювер на GitHub Pages</a> и введите адрес {SIMULATOR_URL}
+                  </p>
+                )}
+                {simulatorError && (
+                  <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#dc2626' }}>{simulatorError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {showHelp && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'white', width: '90%', maxWidth: 560, maxHeight: '85%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <h3 style={{ margin: 0 }}>Справка — Редактор</h3>
+              <button onClick={() => setShowHelp(false)} style={{ padding: '6px 12px', cursor: 'pointer' }}>Закрыть</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', fontSize: '14px', lineHeight: 1.5 }}>
+              <p><strong>Канва.</strong> В правой панели (Canvas) задаются ширина, высота, пропорции и цвет фона. Пресеты: 16:9, 4:3, 9:16 или свои значения. X, Y, Ш, В виджетов поддерживают проценты (например 50%).</p>
+              <p><strong>Вкладки.</strong> Кнопка «+» добавляет вкладку; переключайтесь по ним и раскладывайте виджеты по экранам.</p>
+              <p><strong>Виджеты.</strong> В левой панели: Кнопка, Переключатель, Слайдер, Поле ввода, LED, Метка, Прямоугольник. Выберите тип — виджет появится на канве. Перетаскивание и ресайз за углы (при выделении). Подпись — в свойстве «Caption».</p>
+              <p><strong>Переменные.</strong> В свойствах виджета укажите «Variable Name». Кнопка, слайдер, поле ввода и переключатель отправляют значение на устройство; LED и метка отображают данные с устройства. Поддерживаются кириллические имена.</p>
+              <p><strong>Генерация кода.</strong> «Сгенерировать код» — предпросмотр и скачивание .ino. «Получить блок (.ubi)» — блок для вставки в проект FLProg.</p>
+              <p><strong>Симулятор.</strong> Запустите <code>npm run simulator</code>, затем «Отправить проект в симулятор». Во вьювере укажите адрес localhost:31337 и подключитесь.</p>
+              <p><strong>Демо-режим.</strong> Кнопка «Демо» — проверка интерфейса на канве без симулятора (кнопки, слайдер, ввод).</p>
+              <p><strong>Копирование.</strong> Ctrl+C по виджету, Ctrl+V — вставка копии (работает и с русской раскладкой).</p>
             </div>
           </div>
         </div>
       )}
       {copyToastVisible && (
         <div className="toast toast-success">
-          Code copied to clipboard
+          Код скопирован в буфер обмена
         </div>
       )}
     </div>

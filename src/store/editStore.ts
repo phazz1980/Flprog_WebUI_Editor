@@ -36,18 +36,18 @@ function loadInitialTabs(): Tab[] {
   try {
     const raw = localStorage.getItem(KEY.tabs);
     if (!raw) {
-      return [{ id: 'tab_1', name: 'Tab 1' }];
+      return [{ id: 'tab_1', name: 'Вкладка 1' }];
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return [{ id: 'tab_1', name: 'Tab 1' }];
+      return [{ id: 'tab_1', name: 'Вкладка 1' }];
     }
     return parsed.map((t: any, index: number): Tab => ({
       id: t?.id || `tab_${index + 1}`,
-      name: t?.name || `Tab ${index + 1}`,
+      name: t?.name || `Вкладка ${index + 1}`,
     }));
   } catch {
-    return [{ id: 'tab_1', name: 'Tab 1' }];
+    return [{ id: 'tab_1', name: 'Вкладка 1' }];
   }
 }
 
@@ -178,7 +178,7 @@ export const useEditStore = create<EditState>((set) => ({
   addTab: () => set((state) => {
     const nextIndex = state.tabs.length + 1;
     const newTabId = `tab_${nextIndex}`;
-    const newTabs = [...state.tabs, { id: newTabId, name: `Tab ${nextIndex}` }];
+    const newTabs = [...state.tabs, { id: newTabId, name: `Вкладка ${nextIndex}` }];
     localStorage.setItem(KEY.tabs, JSON.stringify(newTabs));
     localStorage.setItem(KEY.activeTabId, newTabId);
     return {

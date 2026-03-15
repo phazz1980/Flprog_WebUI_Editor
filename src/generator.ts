@@ -1,5 +1,8 @@
 import { Widget, Tab } from './types';
 
+/** URL вьювера (при деплое на GitHub Pages). В сгенерированной странице корня — ссылка для подключения к ESP на порту 80. */
+const VIEWER_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor/viewer';
+
 const escapeCppString = (value: string): string =>
   (value ?? '')
     .replace(/\\/g, '\\\\')
@@ -229,6 +232,7 @@ void handleRoot(FLProgWebServer *server) {
     "<title>ESP32 Web UI</title></head><body>"
     "<h1>ESP32 Web UI (Flprog_Ethernet)</h1>"
     "<p>Use external Web app to work with this device.</p>"
+    "<p>Порт 80: <a href=\\"${VIEWER_URL}\\" target=\\"_blank\\" rel=\\"noopener\\">Открыть вьювер</a> и ввести IP этого устройства (порт 80).</p>"
     "</body></html>"
   );
 }

@@ -72,7 +72,12 @@
 
 .tabs-bar:has(.tabs-row) {
   margin-bottom: 0;
+  margin-left: -1px;
   align-items: flex-end;
+}
+
+.tabs-bar:has(.tabs-row) ~ .canvas-wrapper {
+  margin-top:-2px;
 }
 
 .tabs-row {
@@ -115,6 +120,7 @@
   margin-bottom: -3px; /* перекрывает верхний border канвы (3px) */
   padding-bottom: 8px;
   border-color: #475569;
+  border-width: 3px 3px 0 3px;
   position: relative;
   z-index: 1;
 }
@@ -135,11 +141,11 @@
   font-size: 13px;
 }
 
-/* Окно выбора вкладки (формат 9:16) — слой ниже канвы, выравнивание по левому краю канвы */
+/* Окно выбора вкладки (формат 9:16): кнопка под канвой, привязана к левому краю канвы */
 .tabs-bar:not(:has(.tabs-row)) {
   margin-bottom: 0;
   margin-top: 6px;
-  margin-left: 0;
+  margin-left: 1px;
   min-height: unset;
   align-items: flex-end;
   position: relative;
@@ -148,6 +154,7 @@
 
 .tab-picker-wrap {
   position: relative;
+  overflow: visible;
 }
 
 .tabs-bar:not(:has(.tabs-row)) .tab-picker-trigger {
@@ -186,10 +193,18 @@
   border: 1px solid #475569;
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  z-index: 100;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
   padding: 4px 0;
+}
+
+.tab-picker-dropdown-portal {
+  margin-top: 1px;
+  max-width: 260px;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 10000;
 }
 
 .tab-picker-option {
@@ -277,6 +292,6 @@
   }
 
   .tabs-bar:not(:has(.tabs-row)) {
-    margin-left: 2px; /* как padding контейнера канвы */
+    margin-left: 1px;
   }
 }
