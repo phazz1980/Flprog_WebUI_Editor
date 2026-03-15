@@ -1005,7 +1005,7 @@ function App() {
             </div>
           ))}
         </div>
-        <div style={{ width: displayWidth, flexShrink: 0 }}>
+        <div className="canvas-wrapper" style={{ width: displayWidth, flexShrink: 0 }}>
           <div
             className="canvas-inner"
             style={{

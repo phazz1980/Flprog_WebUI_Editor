@@ -50,6 +50,11 @@
   min-width: 0;
 }
 
+.canvas-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
 .canvas-inner {
   position: relative;
   max-width: 100%;
@@ -130,14 +135,15 @@
   font-size: 13px;
 }
 
-/* Окно выбора вкладки (формат 9:16) — как в редакторе */
+/* Окно выбора вкладки (формат 9:16) — слой ниже канвы, выравнивание по левому краю канвы */
 .tabs-bar:not(:has(.tabs-row)) {
   margin-bottom: 0;
   margin-top: 6px;
+  margin-left: 0;
   min-height: unset;
   align-items: flex-end;
   position: relative;
-  z-index: 10;
+  z-index: 0;
 }
 
 .tab-picker-wrap {
@@ -148,8 +154,9 @@
   padding: 4px 12px;
   padding-bottom: 8px;
   border-radius: 6px 6px 0 0;
-  border: 1px solid #475569;
+  border: 3px solid #475569;
   border-bottom: none;
+  box-shadow: 0 0 0 1px #334155;
   background-color: var(--canvas-color, #f3f4f6);
   color: var(--tab-text, #4b5563);
   font-size: 13px;
@@ -163,6 +170,7 @@
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-sizing: border-box;
 }
 
 .tab-picker-dropdown {
@@ -265,7 +273,10 @@
   }
 
   .tabs-bar {
-    margin-left: 3px;
     margin-right: 12px;
+  }
+
+  .tabs-bar:not(:has(.tabs-row)) {
+    margin-left: 2px; /* как padding контейнера канвы */
   }
 }
