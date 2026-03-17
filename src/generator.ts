@@ -1,5 +1,6 @@
 import { Widget, Tab } from './types';
 
+/** Порядок id секций при сборке (см. docs/IMPORT_JSON_FORMAT.md). */
 /** URL вьювера (при деплое на GitHub Pages). В сгенерированной странице корня — ссылка для подключения к ESP на порту 80. */
 const VIEWER_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor/viewer';
 
@@ -308,3 +309,106 @@ void handle404(FLProgWebServer *server) {
 }
 `;
 };
+
+/** Разбивает полный скетч на секции по границам функций (см. docs/IMPORT_JSON_FORMAT.md). */
+function splitCodeIntoSections(fullCode: string): { id: string; name: string; code: string }[] {
+  const sections: { id: string; name: string; code: string }[] = [];
+  const markers: { id: string; name: string; start: RegExp }[] = [
+    { id: 'includes', name: 'Подключения', start: /^\/\* @once \*\/\s*\n/s },
+    { id: 'globals', name: 'Глобальные переменные', start: /^int port=/m },
+    { id: 'setup', name: 'Инициализация', start: /^void setup\(\)/m },
+    { id: 'loop', name: 'Цикл', start: /^void loop\(\)/m },
+    { id: 'handleRoot', name: 'Главная страница', start: /^void handleRoot\(/m },
+    { id: 'handleConfig', name: 'Обработчик /config', start: /^void handleConfig\(/m },
+    { id: 'handleSetVar', name: 'Обработчик /set', start: /^void handleSetVar\(/m },
+    { id: 'handleState', name: 'Обработчик /state', start: /^void handleState\(/m },
+    { id: 'handlePing', name: 'Обработчик /ping', start: /^void handlePing\(/m },
+    { id: 'handle404', name: 'Обработчик 404', start: /^void handle404\(/m },
+  ];
+
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i];
+    const match = fullCode.match(m.start);
+    if (!match || match.index == null) continue;
+    const start = match.index;
+    const end = i < markers.length - 1
+      ? (fullCode.match(markers[i + 1].start)?.index ?? fullCode.length)
+      : fullCode.length;
+    let code = fullCode.slice(start, end).trimEnd();
+    if (code.endsWith('};')) code = code.trimEnd();
+    sections.push({ id: m.id, name: m.name, code });
+  }
+
+  return sections;
+}
+
+/** Собирает JSON для импорта в формате docs/IMPORT_JSON_FORMAT.md. */
+export function buildImportJson(
+  widgets: Widget[],
+  canvasConfig: { width?: number; height?: number; color?: string },
+  tabs?: Tab[],
+  options?: { activeTabId?: string; projectName?: string }
+): Record<string, unknown> {
+  const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
+  const isBidirectional = (w: Widget) =>
+    w.type === 'switch' || w.type === 'slider' || w.type === 'input';
+
+  const parameters = [
+    { name: 'port', type: 'int', default: '80', parName: 'par' },
+  ];
+
+  const inputs: { varName: string; type: string; inName?: string }[] = [];
+  const outputs: { varName: string; type: string; outName?: string }[] = [];
+
+  const labelFor = (w: Widget) => (w.name && String(w.name).trim()) ? String(w.name).trim() : (w.varName || w.id);
+
+  widgetsWithVars.forEach((w) => {
+    const t = w.varType === 'none' ? 'int' : w.varType;
+    const varName = w.varName || w.id;
+    const label = labelFor(w);
+    if (isBidirectional(w)) {
+      inputs.push({ varName: `${varName}_in`, type: t, inName: label });
+      outputs.push({ varName: `${varName}_out`, type: t, outName: label });
+    } else if (w.type === 'led' || w.type === 'label') {
+      inputs.push({ varName, type: t, inName: label });
+    } else if (w.type === 'button') {
+      outputs.push({ varName, type: t, outName: label });
+    }
+  });
+  inputs.push({ varName: 'ui_message', type: 'String', inName: 'ui_message' });
+  if (!widgetsWithVars.some((w) => w.varName === 'sound_enabled')) {
+    inputs.push({ varName: 'sound_enabled', type: 'byte', inName: 'sound_enabled' });
+  }
+  outputs.push({ varName: 'alarm_reset', type: 'bool', outName: 'alarm_reset' });
+
+  const fullCode = generateArduinoCode(widgets, canvasConfig, tabs);
+  const sections = splitCodeIntoSections(fullCode);
+
+  const meta = {
+    name: options?.projectName ?? 'Web UI проект',
+    description: 'Экспорт из редактора Flprog Web UI',
+    author: '',
+    createdAt: new Date().toISOString(),
+  };
+
+  const ui = {
+    widgets,
+    tabs: tabs ?? [{ id: 'tab_1', name: 'Вкладка 1' }],
+    canvasConfig: {
+      width: canvasConfig?.width ?? 400,
+      height: canvasConfig?.height ?? 300,
+      color: canvasConfig?.color ?? '#ffffff',
+    },
+    activeTabId: options?.activeTabId ?? 'tab_1',
+  };
+
+  return {
+    version: 1,
+    meta,
+    parameters,
+    inputs,
+    outputs,
+    sections,
+    ui,
+  };
+}

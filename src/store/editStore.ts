@@ -22,6 +22,7 @@ interface EditState {
   addTab: () => void;
   setActiveTab: (id: string) => void;
   renameTab: (id: string, name: string) => void;
+  removeTab: (id: string) => void;
 }
 
 const KEY = {
@@ -104,6 +105,7 @@ export const useEditStore = create<EditState>((set) => ({
         color: type === 'input' ? '#ffffff' : type === 'led' ? '#ff0000' : type === 'rect' ? '#cccccc' : type === 'switch' ? '#10b981' : '#3b82f6',
         varName: id,
         varType: type === 'button' || type === 'led' || type === 'switch' ? 'bool' : type === 'slider' ? 'int' : type === 'rect' ? 'none' : 'String',
+        name: '',
         tabId: currentTabId,
       },
     ];
@@ -201,5 +203,27 @@ export const useEditStore = create<EditState>((set) => ({
     const newTabs = state.tabs.map((tab) => tab.id === id ? { ...tab, name: trimmed } : tab);
     localStorage.setItem(KEY.tabs, JSON.stringify(newTabs));
     return { tabs: newTabs };
+  }),
+  removeTab: (id) => set((state) => {
+    if (state.tabs.length <= 1) return state;
+    if (!state.tabs.some((t) => t.id === id)) return state;
+
+    const newTabs = state.tabs.filter((t) => t.id !== id);
+    const nextActiveTabId = state.activeTabId === id
+      ? (newTabs[Math.max(0, state.tabs.findIndex((t) => t.id === id) - 1)]?.id ?? newTabs[0]?.id ?? 'tab_1')
+      : state.activeTabId;
+
+    const newWidgets = state.widgets.filter((w) => (w.tabId ?? 'tab_1') !== id);
+
+    localStorage.setItem(KEY.tabs, JSON.stringify(newTabs));
+    localStorage.setItem(KEY.activeTabId, nextActiveTabId);
+    localStorage.setItem(KEY.widgets, JSON.stringify(newWidgets));
+
+    return {
+      tabs: newTabs,
+      activeTabId: nextActiveTabId,
+      widgets: newWidgets,
+      selectedId: null,
+    };
   }),
 }));

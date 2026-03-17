@@ -10,6 +10,8 @@ export interface Widget {
   color: string;
   varName: string;
   varType: 'int' | 'float' | 'bool' | 'byte' | 'String' | 'none';
+  /** Имя для экспорта в JSON (parName/inName/outName); если пусто — используется имя переменной. */
+  name?: string;
   tabId?: string;
 }
 

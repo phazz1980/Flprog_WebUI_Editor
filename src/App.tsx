@@ -1,16 +1,19 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
-import { generateArduinoCode } from './generator';
+import { generateArduinoCode, buildImportJson } from './generator';
 import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
 import { Widget } from './types';
-import { GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
+import { BUILD_DATE, GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
 
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
 const CANVAS_PANEL_GAP = 28;
+/** Отступ, когда панель скрыта, чтобы канва не заезжала на кнопки «☰» / «⚙». */
+const LEFT_TOGGLE_OFFSET = 48;
 import './App.css';
 
 /** Stage: use KonvaStage with relaxed types (react-konva typings are incomplete for Stage) */
@@ -18,22 +21,35 @@ const Stage = KonvaStage as React.ComponentType<any>;
 const Layer = (props: any) => <KonvaLayer {...props}>{props.children}</KonvaLayer>;
 
 /** Виджеты хранятся и рисуются в дизайн-единицах канваса (0..width, 0..height), чтобы масштаб канвы одинаково масштабировал сетку и виджеты. */
-const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgColor = '#ffffff' }: any) => {
+const WidgetComponent = ({
+  shapeProps,
+  isSelected,
+  onSelect,
+  onChange,
+  canvasBgColor = '#ffffff',
+  isDemoMode = false,
+  demoDisplayValue,
+  onDemoClick,
+  onDemoSliderChange,
+  onDemoInputFocus,
+}: any) => {
   const shapeRef = useRef<Konva.Group>(null);
   const trRef = useRef<Konva.Transformer>(null);
+  const sliderTrackRef = useRef<Konva.Rect>(null);
   const captionBg = canvasBgColor;
+  const displayText = demoDisplayValue !== undefined ? demoDisplayValue : shapeProps.text;
   const widgetBg = shapeProps.type === 'switch'
-    ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb')
+    ? (displayText === '1' ? '#22c55e' : '#e5e7eb')
     : shapeProps.color;
   const textOnWidget = contrastColor(widgetBg);
   const textOnCaption = contrastColor(captionBg);
 
   useEffect(() => {
-    if (isSelected && trRef.current && shapeRef.current) {
+    if (!isDemoMode && isSelected && trRef.current && shapeRef.current) {
       trRef.current.nodes([shapeRef.current]);
       trRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected]);
+  }, [isSelected, isDemoMode]);
 
   const lw = shapeProps.width;
   const lh = shapeProps.height;
@@ -41,22 +57,49 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
   const textY = (lh - textHeight) / 2;
   const textFontSize = Math.max(8, textHeight * 0.65);
 
+  const handleDemoClick = () => {
+    if (!isDemoMode) return;
+    if (shapeProps.type === 'input') {
+      onDemoInputFocus?.(shapeProps.id);
+      return;
+    }
+    if (onDemoClick && (shapeProps.type === 'button' || shapeProps.type === 'switch' || shapeProps.type === 'led')) {
+      onDemoClick(shapeProps.id);
+    }
+  };
+
+  const handleSliderDrag = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (!isDemoMode || !onDemoSliderChange || shapeProps.type !== 'slider') return;
+    const group = shapeRef.current;
+    if (!group) return;
+    const pos = group.getRelativePointerPosition();
+    if (!pos) return;
+    const thumbRadius = Math.min(lh / 2 - 2, 8);
+    const trackWidth = lw - 2 * thumbRadius;
+    const mouseX = pos.x;
+    const value = Math.min(100, Math.max(0, ((mouseX - thumbRadius) / trackWidth) * 100));
+    onDemoSliderChange(shapeProps.id, Math.round(value));
+    sliderTrackRef.current?.position({ x: 0, y: 0 });
+  };
+
   return (
     <>
       <Group
-        draggable
+        draggable={!isDemoMode}
         x={shapeProps.x}
         y={shapeProps.y}
         ref={shapeRef}
-        onClick={onSelect}
-        onTap={onSelect}
-        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
+        onMouseDown={isDemoMode ? undefined : onSelect}
+        onTouchStart={isDemoMode ? undefined : onSelect}
+        onClick={isDemoMode ? handleDemoClick : undefined}
+        onTap={isDemoMode ? handleDemoClick : undefined}
+        onDragMove={isDemoMode ? undefined : (e: Konva.KonvaEventObject<DragEvent>) => {
           const pos = e.target.position();
           const snapped = { x: snapToGrid(pos.x), y: snapToGrid(pos.y) };
           e.target.position(snapped);
           onChange({ ...shapeProps, ...snapped });
         }}
-        onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
+        onDragEnd={isDemoMode ? undefined : (e: Konva.KonvaEventObject<DragEvent>) => {
           const pos = e.target.position();
           onChange({
             ...shapeProps,
@@ -64,7 +107,7 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
             y: snapToGrid(pos.y),
           });
         }}
-        onTransformEnd={() => {
+        onTransformEnd={isDemoMode ? undefined : () => {
           const node = shapeRef.current;
           if (!node) return;
           const scaleX = node.scaleX();
@@ -101,10 +144,10 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
             radius={lw / 2}
             x={lw / 2}
             y={lw / 2}
-            fill={shapeProps.text === '1' ? shapeProps.color : '#333'}
+            fill={displayText === '1' ? shapeProps.color : '#333'}
             stroke="#111"
             strokeWidth={2}
-            shadowBlur={shapeProps.text === '1' ? 15 : 0}
+            shadowBlur={displayText === '1' ? 15 : 0}
             shadowColor={shapeProps.color}
           />
         ) : shapeProps.type === 'label' ? (
@@ -123,7 +166,13 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
           <Rect
             width={lw}
             height={lh}
-            fill={shapeProps.type === 'switch' ? (shapeProps.text === '1' ? '#22c55e' : '#e5e7eb') : shapeProps.color}
+            fill={
+              shapeProps.type === 'switch'
+                ? (displayText === '1' ? '#22c55e' : '#e5e7eb')
+                : shapeProps.type === 'button' && isDemoMode && displayText === '1'
+                  ? (() => { const c = shapeProps.color; if (c.startsWith('#')) { const n = parseInt(c.slice(1), 16); const r = Math.max(0, ((n >> 16) & 0xff) - 40); const g = Math.max(0, ((n >> 8) & 0xff) - 40); const b = Math.max(0, (n & 0xff) - 40); return `rgb(${r},${g},${b})`; } return c; })()
+                  : shapeProps.color
+            }
             stroke={shapeProps.type === 'input' ? '#ddd' : undefined}
             strokeWidth={shapeProps.type === 'input' ? 1 : 0}
             cornerRadius={shapeProps.type === 'button' ? 5 : shapeProps.type === 'input' ? 2 : shapeProps.type === 'switch' ? lh / 2 : 10}
@@ -133,7 +182,7 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
         {shapeProps.type === 'switch' && (
           <Circle
             radius={lh / 2 - 3}
-            x={shapeProps.text === '1' ? lw - lh / 2 : lh / 2}
+            x={displayText === '1' ? lw - lh / 2 : lh / 2}
             y={lh / 2}
             fill="#ffffff"
             shadowBlur={4}
@@ -141,7 +190,7 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
           />
         )}
         {shapeProps.type === 'slider' && (() => {
-          const raw = shapeProps.text ?? '0';
+          const raw = displayText ?? '0';
           const value = Math.min(100, Math.max(0, parseFloat(raw) || 0));
           const thumbRadius = Math.min(lh / 2 - 2, 8);
           const trackWidth = lw - 2 * thumbRadius;
@@ -160,22 +209,48 @@ const WidgetComponent = ({ shapeProps, isSelected, onSelect, onChange, canvasBgC
                 listening={false}
               />
               <Text
-                text={shapeProps.text ?? ''}
+                text={displayText ?? ''}
                 x={lw + 8}
                 y={textY}
                 width={50}
                 height={textHeight}
                 align="left"
                 verticalAlign="middle"
-                fill={textOnWidget}
+                fill={textOnCaption}
                 fontSize={textFontSize}
               />
             </>
           );
         })()}
+        {isDemoMode && shapeProps.type === 'slider' && onDemoSliderChange && (
+          <Rect
+            ref={sliderTrackRef}
+            x={0}
+            y={0}
+            width={lw}
+            height={lh}
+            fill="transparent"
+            listening={true}
+            draggable={true}
+            onDragMove={handleSliderDrag}
+            onDragEnd={handleSliderDrag}
+            onMouseDown={(e: Konva.KonvaEventObject<MouseEvent>) => {
+              e.cancelBubble = true;
+              const group = shapeRef.current;
+              if (!group) return;
+              const pos = group.getRelativePointerPosition();
+              if (!pos) return;
+              const thumbRadius = Math.min(lh / 2 - 2, 8);
+              const trackWidth = lw - 2 * thumbRadius;
+              const mouseX = pos.x;
+              const value = Math.min(100, Math.max(0, ((mouseX - thumbRadius) / trackWidth) * 100));
+              onDemoSliderChange(shapeProps.id, Math.round(value));
+            }}
+          />
+        )}
         {(shapeProps.type === 'button' || shapeProps.type === 'input') && (
           <Text
-            text={shapeProps.text}
+            text={(shapeProps.type === 'input' && displayText !== undefined ? displayText : shapeProps.text) ?? ''}
             x={0}
             y={textY}
             width={lw}
@@ -221,6 +296,8 @@ function App() {
     addTab,
     setActiveTab,
     renameTab,
+    removeTab,
+    setWidgets,
   } = useEditStore();
 
   const [canvasZoom, setCanvasZoom] = useState(1);
@@ -242,15 +319,37 @@ function App() {
   const displayWidth = Math.round(canvasConfig.width * scale);
   const displayHeight = Math.round(canvasConfig.height * scale);
 
+  const MESSAGE_BAR_HEIGHT = 44;
+  const CANVAS_BORDER = 3;
+  const stageDisplayHeight = displayHeight - MESSAGE_BAR_HEIGHT - CANVAS_BORDER * 2;
+
   const zoomStep = 0.1;
   const zoomMin = 0.25;
   const zoomMax = 3;
   const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const [showCode, setShowCode] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
+  const SIMULATOR_URL = 'http://localhost:31337';
+/** Ссылка на вьювер на GitHub Pages (для кнопки «Открыть клиент» и подсказок). */
+const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor/viewer';
+  const [simulatorLoading, setSimulatorLoading] = useState(false);
+  const [simulatorError, setSimulatorError] = useState<string | null>(null);
+  const [simulatorSuccess, setSimulatorSuccess] = useState(false);
+  const [simulatorOnline, setSimulatorOnline] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoValues, setDemoValues] = useState<Record<string, string>>({});
+  const [demoEditingInputId, setDemoEditingInputId] = useState<string | null>(null);
+  const [demoInputOverlayRect, setDemoInputOverlayRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const demoInputRef = useRef<HTMLInputElement>(null);
   const [showLeftPanel, setShowLeftPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
   const [showRightPanel, setShowRightPanel] = useState(() => typeof window !== 'undefined' && window.innerWidth > MOBILE_BREAKPOINT);
+  const [tabPickerOpen, setTabPickerOpen] = useState(false);
+  const tabPickerRef = useRef<HTMLDivElement>(null);
+  const tabPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const tabPickerDropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const prevIsMobileRef = useRef(isMobile);
   useEffect(() => {
     if (prevIsMobileRef.current !== isMobile) {
@@ -273,6 +372,30 @@ function App() {
   })();
 
   const proportionSelectValue = customProportionSelected ? 'custom' : proportionValue;
+  /** Вкладки в ряд над канвой для ПК и планшета; для мобильного — окно выбора вкладки */
+  const tabsInRow = proportionValue === 'pc' || proportionValue === 'tablet';
+
+  useLayoutEffect(() => {
+    if (!tabPickerOpen || !tabPickerTriggerRef.current) {
+      setDropdownPosition(null);
+      return;
+    }
+    const rect = tabPickerTriggerRef.current.getBoundingClientRect();
+    setDropdownPosition({ top: rect.bottom, left: rect.left, width: rect.width });
+  }, [tabPickerOpen]);
+
+  useEffect(() => {
+    if (!tabPickerOpen) return;
+    const handle = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        !tabPickerRef.current?.contains(target) &&
+        !tabPickerDropdownRef.current?.contains(target)
+      ) setTabPickerOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [tabPickerOpen]);
 
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
   const ratioDisplay = (() => {
@@ -380,8 +503,14 @@ function App() {
   const handleGenerateCode = () => {
     const stamp = getCreationStamp();
     const baseName = `Flprog_WebUI_${stamp}`;
-    const code = generateArduinoCode(widgets, canvasConfig);
-    const blob = new Blob([code], { type: 'text/plain' });
+    const code = generateArduinoCode(widgets, canvasConfig, tabs);
+    // UTF-8 с BOM — чтобы кириллица не превращалась в крокозябры при открытии в Windows
+    const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+    const encoded = new TextEncoder().encode(code);
+    const combined = new Uint8Array(utf8Bom.length + encoded.length);
+    combined.set(utf8Bom, 0);
+    combined.set(encoded, utf8Bom.length);
+    const blob = new Blob([combined], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -389,6 +518,120 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const sendToSimulator = useCallback(async () => {
+    setSimulatorError(null);
+    setSimulatorSuccess(false);
+    setSimulatorLoading(true);
+    try {
+      const res = await fetch(`${SIMULATOR_URL}/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ widgets, canvasConfig, tabs }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setSimulatorSuccess(true);
+    } catch (e: any) {
+      setSimulatorError(e?.message || 'Не удалось подключиться к симулятору. Запустите: npm run simulator');
+    } finally {
+      setSimulatorLoading(false);
+    }
+  }, [widgets, canvasConfig]);
+
+  // Проверка доступности симулятора при открытой панели кода
+  useEffect(() => {
+    if (!showCode) {
+      setSimulatorOnline(false);
+      return;
+    }
+    const check = () => {
+      fetch(`${SIMULATOR_URL}/ping`, { method: 'GET' })
+        .then((r) => setSimulatorOnline(r.ok))
+        .catch(() => setSimulatorOnline(false));
+    };
+    check();
+    const t = setInterval(check, 3000);
+    return () => clearInterval(t);
+  }, [showCode]);
+
+  const enterDemoMode = () => {
+    const initial: Record<string, string> = {};
+    widgets.forEach((w) => {
+      if (w.type === 'button' || w.type === 'switch' || w.type === 'led') {
+        initial[w.id] = w.text === '1' ? '1' : '0';
+      } else if (w.type === 'slider') {
+        const raw = w.text ?? '0';
+        initial[w.id] = String(Math.min(100, Math.max(0, parseFloat(raw) || 0)));
+      } else if (w.type === 'input') {
+        initial[w.id] = w.text ?? '';
+      }
+    });
+    setDemoValues(initial);
+    setDemoMode(true);
+    selectWidget(null);
+  };
+
+  const exitDemoMode = () => {
+    setDemoMode(false);
+    setDemoValues({});
+    setDemoEditingInputId(null);
+  };
+
+  const handleDemoInputFocus = useCallback((id: string) => {
+    setDemoEditingInputId(id);
+  }, []);
+
+  const handleDemoInputChange = useCallback((id: string, value: string) => {
+    setDemoValues((prev) => ({ ...prev, [id]: value }));
+  }, []);
+
+  const handleDemoInputBlur = useCallback(() => {
+    setDemoEditingInputId(null);
+    setDemoInputOverlayRect(null);
+  }, []);
+
+  useEffect(() => {
+    if (!demoMode || !demoEditingInputId || !stageRef.current) {
+      setDemoInputOverlayRect(null);
+      return;
+    }
+    const w = widgets.find((x) => x.id === demoEditingInputId);
+    if (!w) {
+      setDemoInputOverlayRect(null);
+      return;
+    }
+    const container = stageRef.current.container();
+    const r = container.getBoundingClientRect();
+    setDemoInputOverlayRect({
+      left: r.left + w.x * scale,
+      top: r.top + w.y * scale,
+      width: Math.max(40, w.width * scale),
+      height: Math.max(24, w.height * scale),
+    });
+  }, [demoMode, demoEditingInputId, widgets, scale]);
+
+  useEffect(() => {
+    if (demoInputOverlayRect) {
+      const t = requestAnimationFrame(() => {
+        demoInputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(t);
+    }
+  }, [demoInputOverlayRect]);
+
+  const handleDemoClick = useCallback((id: string) => {
+    setDemoValues((prev) => {
+      const cur = prev[id] ?? '0';
+      return { ...prev, [id]: cur === '1' ? '0' : '1' };
+    });
+  }, []);
+
+  const handleDemoSliderChange = useCallback((id: string, value: number) => {
+    setDemoValues((prev) => ({ ...prev, [id]: String(value) }));
+  }, []);
 
   const handleGenerateUbiBlock = () => {
     const parserApi = window as any;
@@ -404,7 +647,7 @@ function App() {
     try {
       const stamp = getCreationStamp();
       const blockName = `Flprog_WebUI_${stamp}`;
-      const inoCode = generateArduinoCode(widgets, canvasConfig);
+      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs);
       const parsed = parserApi.parseArduinoCode(inoCode);
       const setupCode = parserApi.extractFunctionBody(inoCode, 'setup');
       const loopCode = parserApi.extractFunctionBody(inoCode, 'loop');
@@ -425,7 +668,9 @@ function App() {
         Boolean(parsed.not_can_many_use_by_marker)
       );
 
-      const blob = new Blob([xml], { type: 'application/xml' });
+      // UTF-8 без BOM — FLProg не открывает .ubi с BOM в начале файла
+      const xmlEncoded = new TextEncoder().encode(xml);
+      const blob = new Blob([xmlEncoded], { type: 'application/xml;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -486,36 +731,36 @@ function App() {
   }, []);
 
   return (
-    <div className="App app-root">
+    <div className={`App app-root ${demoMode ? 'demo-mode' : ''}`}>
+      {!demoMode && (
       <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowLeftPanel(false)}>×</button>
         <div style={{ marginBottom: '8px', paddingRight: '44px', paddingLeft: '44px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Widgets</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Виджеты</h3>
         </div>
         <button className="widget-button" onClick={() => addWidget('button')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🔘</span><span>Add Button</span>
+          <span className="widget-icon">🔘</span><span>Кнопка</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('switch')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">⏽</span><span>Add Switch</span>
+          <span className="widget-icon">⏽</span><span>Переключатель</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('slider')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🎚</span><span>Add Slider</span>
+          <span className="widget-icon">🎚</span><span>Слайдер</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('input')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">⌨</span><span>Add Input</span>
+          <span className="widget-icon">⌨</span><span>Поле ввода</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('led')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#f43f5e', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">💡</span><span>Add LED</span>
+          <span className="widget-icon">💡</span><span>Светодиод</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('label')} style={{ width: '100%', marginBottom: '10px', padding: '10px', cursor: 'pointer', backgroundColor: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">🔤</span><span>Add Label</span>
+          <span className="widget-icon">🔤</span><span>Надпись</span>
         </button>
         <button className="widget-button" onClick={() => addWidget('rect')} style={{ width: '100%', padding: '10px', cursor: 'pointer', backgroundColor: '#64748b', color: 'white', border: 'none', borderRadius: '4px' }}>
-          <span className="widget-icon">▭</span><span>Add Rectangle</span>
+          <span className="widget-icon">▭</span><span>Прямоугольник</span>
         </button>
 
-        <h3 style={{ marginTop: '30px' }}>Canvas</h3>
-        <p style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>Соотношение сторон (логич. ед., не зависят от PPI)</p>
+        <h3 style={{ marginTop: '30px' }}>Канва</h3>
         <label style={{ fontSize: '12px' }}>Пропорции:</label>
         <select
           value={proportionSelectValue}
@@ -530,27 +775,21 @@ function App() {
             const [rW, rH] = (v === 'pc' || v === 'tablet' || v === 'mobile') ? RATIOS[v] : [16, 9];
             let newWidth: number;
             let newHeight: number;
-            if (v === 'mobile') {
-              // Мобильный (9:16): уменьшенные логические размеры, чтобы при 100% помещалось в экран
-              const MOBILE_FIT_FACTOR = 0.85; // запас по краям
-              const maxW = (viewportW - 24) * MOBILE_FIT_FACTOR;
-              const maxH = Math.max(20, (viewportH - VIEWPORT_HEIGHT_MARGIN) * MOBILE_FIT_FACTOR);
-              const widthIfLimitByH = (maxH * rW) / rH;
-              if (widthIfLimitByH <= maxW) {
-                newHeight = snapToGrid(Math.round(maxH));
-                newWidth = snapToGrid(Math.round((newHeight * rW) / rH));
-              } else {
-                newWidth = snapToGrid(Math.round(maxW));
-                newHeight = snapToGrid(Math.round((newWidth * rH) / rW));
-              }
+            // Для ПК, планшета и мобильного — одна плотность: логические размеры подгоняем под viewport
+            const FIT_FACTOR = 0.85; // запас по краям
+            const maxW = (viewportW - 24) * FIT_FACTOR;
+            const maxH = Math.max(20, (viewportH - VIEWPORT_HEIGHT_MARGIN) * FIT_FACTOR);
+            const widthIfLimitByH = (maxH * rW) / rH;
+            if (widthIfLimitByH <= maxW) {
+              newHeight = snapToGrid(Math.round(maxH));
+              newWidth = snapToGrid(Math.round((newHeight * rW) / rH));
             } else {
-              const maxCurrent = Math.max(canvasConfig.width, canvasConfig.height);
-              newWidth = rW >= rH ? maxCurrent : Math.round(maxCurrent * rW / rH);
-              newHeight = rW >= rH ? Math.round(maxCurrent * rH / rW) : maxCurrent;
+              newWidth = snapToGrid(Math.round(maxW));
+              newHeight = snapToGrid(Math.round((newWidth * rH) / rW));
             }
             updateCanvas({ width: newWidth, height: newHeight });
           }}
-          style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
+          style={{ width: '100%', marginBottom: '8px', padding: '4px 8px', boxSizing: 'border-box' }}
         >
           <option value="pc">ПК (16:9)</option>
           <option value="tablet">Планшет (4:3)</option>
@@ -576,7 +815,7 @@ function App() {
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              style={{ width: '100%', marginBottom: '8px', padding: '4px 8px' }}
+              style={{ width: '100%', marginBottom: '8px', padding: '4px 8px', boxSizing: 'border-box' }}
             />
           </>
         )}
@@ -590,34 +829,139 @@ function App() {
           onBlur={commitCanvasColor}
           style={{ width: '100%' }}
         />
-        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', cursor: 'pointer', backgroundColor: '#000', color: 'white', border: 'none', borderRadius: '4px', fontWeight: 'bold' }}>Generate Code</button>
+        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}>Сгенерировать код</button>
+        <a
+          href={VIEWER_GITHUB_PAGES_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: '10px', padding: '12px', boxSizing: 'border-box', textAlign: 'center', cursor: 'pointer', backgroundColor: '#e5e7eb', color: '#374151', border: '1px solid #d1d5db', borderRadius: '4px', fontWeight: 'bold', textDecoration: 'none', minHeight: 44 }}
+          title="Открыть вьювер на GitHub Pages (подключение к устройству по IP)"
+        >
+          Открыть клиент
+        </a>
+        <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
+          Flprog Web UI · Сборка: {BUILD_DATE}
+        </p>
       </div>
+      )}
 
       <div
         className="canvas-container"
         style={{
-          marginLeft: !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0,
-          marginRight: !isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : 0,
+          marginLeft: demoMode ? 0 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
+          marginRight: demoMode ? 0 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
           transition: 'margin 0.2s ease',
         }}
       >
-        <div className="tabs-bar">
-          <select className="tabs-select" value={activeTabId} onChange={(e) => setActiveTab(e.target.value)}>
-            {tabs.map((tab) => (
-              <option key={tab.id} value={tab.id}>{tab.name}</option>
-            ))}
-          </select>
+        <div
+          className="tabs-bar"
+          style={{
+            ['--canvas-color' as string]: previewCanvasColor ?? canvasConfig.color,
+            ['--tab-text' as string]: contrastColor(previewCanvasColor ?? canvasConfig.color),
+          }}
+        >
+          {tabsInRow ? (
+            <div className="tabs-row" role="tablist">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.id === activeTabId}
+                  className={`tab-tab ${tab.id === activeTabId ? 'active' : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="tab-picker-wrap" ref={tabPickerRef}>
+              <button
+                ref={tabPickerTriggerRef}
+                type="button"
+                className="tabs-select tab-picker-trigger"
+                onClick={() => setTabPickerOpen((v) => !v)}
+                aria-expanded={tabPickerOpen}
+                aria-haspopup="listbox"
+              >
+                {tabs.find((t) => t.id === activeTabId)?.name ?? 'Вкладка'}
+              </button>
+              {tabPickerOpen && dropdownPosition && createPortal(
+                <div
+                  ref={tabPickerDropdownRef}
+                  className="tab-picker-dropdown tab-picker-dropdown-portal"
+                  role="listbox"
+                  style={{
+                    position: 'fixed',
+                    top: dropdownPosition.top,
+                    left: dropdownPosition.left,
+                    minWidth: dropdownPosition.width,
+                    ['--canvas-color' as string]: previewCanvasColor ?? canvasConfig.color,
+                    ['--tab-text' as string]: contrastColor(previewCanvasColor ?? canvasConfig.color),
+                    backgroundColor: previewCanvasColor ?? canvasConfig.color,
+                    color: contrastColor(previewCanvasColor ?? canvasConfig.color),
+                  }}
+                >
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="option"
+                      aria-selected={tab.id === activeTabId}
+                      className={`tab-picker-option ${tab.id === activeTabId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                        setTabPickerOpen(false);
+                      }}
+                    >
+                      {tab.name}
+                    </button>
+                  ))}
+                </div>,
+                document.body
+              )}
+            </div>
+          )}
+          {demoMode ? (
+            <button
+              type="button"
+              className="tab-demo-exit tab-rename-button"
+              onClick={exitDemoMode}
+            >
+              Выйти из демо
+            </button>
+          ) : (
+            <>
           <button className="tab-add-button" onClick={addTab}>+</button>
           <button
             className="tab-rename-button"
             onClick={() => {
               const current = tabs.find((t) => t.id === activeTabId);
               if (!current) return;
-              const nextName = window.prompt('Tab name', current.name);
+              const nextName = window.prompt('Имя вкладки', current.name);
               if (nextName && nextName.trim()) renameTab(current.id, nextName.trim());
             }}
           >
             ✎
+          </button>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={() => {
+              const current = tabs.find((t) => t.id === activeTabId);
+              if (!current) return;
+              if (tabs.length <= 1) {
+                alert('Нельзя удалить последнюю вкладку.');
+                return;
+              }
+              if (window.confirm(`Удалить вкладку «${current.name}» и все виджеты на ней?`)) {
+                removeTab(current.id);
+              }
+            }}
+            title="Удалить вкладку"
+          >
+            🗑
           </button>
           <button
             type="button"
@@ -650,11 +994,33 @@ function App() {
               +
             </button>
           </span>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={enterDemoMode}
+            title="Режим демонстрации"
+          >
+            Демо
+          </button>
+          <button
+            type="button"
+            className="tab-rename-button"
+            onClick={() => setShowHelp(true)}
+            title="Справка"
+          >
+            ?
+          </button>
+            </>
+          )}
         </div>
+        {!demoMode && (
+          <>
         <button className="mobile-toggle mobile-toggle-left" onClick={() => setShowLeftPanel((prev) => !prev)}>☰</button>
         <button className="mobile-toggle mobile-toggle-right" onClick={() => setShowRightPanel((prev) => !prev)}>⚙</button>
+          </>
+        )}
 
-        <div style={{ width: displayWidth, flexShrink: 0 }}>
+        <div className="canvas-wrapper" style={{ width: displayWidth, flexShrink: 0 }}>
           <div
             className="canvas-inner"
             style={{
@@ -668,42 +1034,95 @@ function App() {
               boxSizing: 'border-box',
               boxShadow: '0 0 0 1px #334155, 0 8px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08)',
               borderRadius: '6px',
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            <Stage ref={stageRef} width={displayWidth} height={displayHeight} onMouseDown={(e: any) => { if (e.target === e.target.getStage()) selectWidget(null); }}>
-              <Layer>
-                <Group scaleX={scale} scaleY={scale}>
-                  {gridVisible && (
-                    <>
-                      {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
-                        <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
-                      ))}
-                      {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
-                        <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={gridStrokeMinor} strokeWidth={1} />
-                      ))}
-                    </>
-                  )}
-                  {widgets.filter((w: Widget) => (w.tabId || 'tab_1') === activeTabId).map((w: Widget) => (
-                    <WidgetComponent
-                      key={w.id}
-                      shapeProps={w.id === selectedId && previewWidgetColor != null ? { ...w, color: previewWidgetColor } : w}
-                      isSelected={w.id === selectedId}
-                      onSelect={() => selectWidget(w.id)}
-                      onChange={(attrs: any) => updateWidget(w.id, attrs)}
-                      canvasBgColor={previewCanvasColor ?? canvasConfig.color}
-                    />
-                  ))}
-                </Group>
-              </Layer>
-            </Stage>
+            <div style={{ width: displayWidth, height: stageDisplayHeight, flexShrink: 0 }}>
+              <Stage ref={stageRef} width={displayWidth} height={stageDisplayHeight} onMouseDown={(e: any) => { if (!demoMode && e.target === e.target.getStage()) selectWidget(null); }}>
+                <Layer>
+                  <Group scaleX={scale} scaleY={scale}>
+                    {gridVisible && !demoMode && (
+                      <>
+                        {Array.from({ length: Math.floor(canvasConfig.width / GRID_SIZE) + 1 }).map((_, i) => (
+                          <Line key={`v-${i}`} points={[i * GRID_SIZE, 0, i * GRID_SIZE, canvasConfig.height]} stroke={gridStrokeMinor} strokeWidth={1} />
+                        ))}
+                        {Array.from({ length: Math.floor(canvasConfig.height / GRID_SIZE) + 1 }).map((_, i) => (
+                          <Line key={`h-${i}`} points={[0, i * GRID_SIZE, canvasConfig.width, i * GRID_SIZE]} stroke={gridStrokeMinor} strokeWidth={1} />
+                        ))}
+                      </>
+                    )}
+                    {widgets.filter((w: Widget) => (w.tabId || 'tab_1') === activeTabId).map((w: Widget) => (
+                      <WidgetComponent
+                        key={w.id}
+                        shapeProps={w.id === selectedId && previewWidgetColor != null ? { ...w, color: previewWidgetColor } : w}
+                        isSelected={!demoMode && w.id === selectedId}
+                        onSelect={() => selectWidget(w.id)}
+                        onChange={(attrs: any) => updateWidget(w.id, attrs)}
+                        canvasBgColor={previewCanvasColor ?? canvasConfig.color}
+                        isDemoMode={demoMode}
+                        demoDisplayValue={demoValues[w.id]}
+                        onDemoClick={demoMode ? handleDemoClick : undefined}
+                        onDemoSliderChange={demoMode ? handleDemoSliderChange : undefined}
+                        onDemoInputFocus={demoMode ? handleDemoInputFocus : undefined}
+                      />
+                    ))}
+                  </Group>
+                </Layer>
+              </Stage>
+            </div>
+            <div
+              style={{
+                height: MESSAGE_BAR_HEIGHT,
+                minHeight: MESSAGE_BAR_HEIGHT,
+                padding: '8px 10px',
+                boxSizing: 'border-box',
+                borderTop: '1px solid #64748b',
+                backgroundColor: '#f8fafc',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word', color: '#64748b' }}>—</span>
+            </div>
           </div>
         </div>
       </div>
 
+      {demoMode && demoEditingInputId && demoInputOverlayRect && (
+        <input
+          ref={demoInputRef}
+          type="text"
+          value={demoValues[demoEditingInputId] ?? widgets.find((w) => w.id === demoEditingInputId)?.text ?? ''}
+          onChange={(e) => handleDemoInputChange(demoEditingInputId, e.target.value)}
+          onBlur={handleDemoInputBlur}
+          onKeyDown={(e) => { if (e.key === 'Escape') { (e.target as HTMLInputElement).blur(); } }}
+          style={{
+            position: 'fixed',
+            left: demoInputOverlayRect.left,
+            top: demoInputOverlayRect.top,
+            width: demoInputOverlayRect.width,
+            height: demoInputOverlayRect.height,
+            margin: 0,
+            padding: '2px 6px',
+            border: '2px solid #0ea5e9',
+            borderRadius: 4,
+            fontSize: 14,
+            boxSizing: 'border-box',
+            zIndex: 100,
+          }}
+          data-demo-input
+        />
+      )}
+
+      {!demoMode && (
       <div className={`sidebar sidebar-right ${showRightPanel ? 'mobile-open' : 'mobile-closed'}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowRightPanel(false)}>×</button>
+        <div className="sidebar-right-content">
         <div style={{ marginBottom: '8px', paddingRight: '44px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Properties</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 0 }}>Свойства</h3>
         </div>
         {selectedId ? (
           <div>
@@ -865,11 +1284,15 @@ function App() {
                         style={{ width: '100%', marginBottom: '10px' }}
                         placeholder="Текст над виджетом"
                       />
-                    </>
-                  )}
-                  {!((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
-                    <>
-                      <label style={{ fontSize: '12px' }}>Variable Name:</label>
+                      <label style={{ fontSize: '12px' }}>Имя:</label>
+                      <input
+                        type="text"
+                        value={selectedWidget.name ?? ''}
+                        onChange={(e) => updateWidget(selectedId, { name: e.target.value })}
+                        style={{ width: '100%', marginBottom: '10px' }}
+                        placeholder="Для parName/inName/outName в JSON (если пусто — имя переменной)"
+                      />
+                      <label style={{ fontSize: '12px' }}>Имя переменной:</label>
                       <input
                         type="text"
                         value={selectedWidget.varName || ''}
@@ -880,23 +1303,24 @@ function App() {
                   )}
                   {!isBoolLocked && !((selectedWidget.type === 'label') && (selectedWidget.varType === 'none')) && (
                     <>
-                      <label style={{ fontSize: '12px' }}>Type:</label>
+                      <label style={{ fontSize: '12px' }}>Тип:</label>
                       <select
                         value={selectedWidget.varType || 'int'}
                         onChange={(e) => updateWidget(selectedId, { varType: e.target.value as any })}
                         style={{ width: '100%', marginBottom: '10px' }}
                       >
-                        <option value="int">int</option>
-                        <option value="float">float</option>
-                        <option value="bool">bool</option>
-                        <option value="String">String</option>
+                        <option value="int">int (целое)</option>
+                        <option value="float">float (дробное)</option>
+                        <option value="bool">bool (логич.)</option>
+                        <option value="byte">byte (байт)</option>
+                        <option value="String">String (строка)</option>
                       </select>
                     </>
                   )}
                 </>
               );
             })()}
-            <label style={{ fontSize: '12px' }}>Color:</label>
+            <label style={{ fontSize: '12px' }}>Цвет:</label>
             <input
               ref={widgetColorRef}
               type="color"
@@ -907,28 +1331,59 @@ function App() {
               style={{ width: '100%', marginBottom: '10px' }}
             />
             <div style={{ display: 'flex', gap: '5px', marginBottom: '10px' }}>
-              <button onClick={() => bringToFront(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>To Front</button>
-              <button onClick={() => sendToBack(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>To Back</button>
+              <button onClick={() => bringToFront(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>На передний план</button>
+              <button onClick={() => sendToBack(selectedId)} style={{ flex: 1, padding: '5px', fontSize: '12px', cursor: 'pointer' }}>На задний план</button>
             </div>
-            <button onClick={() => removeWidget(selectedId)} style={{ width: '100%', padding: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Delete</button>
+            <button onClick={() => removeWidget(selectedId)} style={{ width: '100%', padding: '10px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Удалить</button>
           </div>
-        ) : <p>Select a widget</p>}
+        ) : <p>Выберите виджет</p>}
+        </div>
+        <div className="sidebar-right-footer">
+          <button
+            onClick={() => {
+              if (window.confirm('Очистить все виджеты на этой вкладке? Это действие нельзя отменить.')) {
+                setWidgets(widgets.filter((w) => (w.tabId || 'tab_1') !== activeTabId));
+                selectWidget(null);
+              }
+            }}
+            style={{ width: '100%', padding: '10px', backgroundColor: '#6b7280', color: 'white', border: 'none', borderRadius: '4px', fontSize: '13px', cursor: 'pointer' }}
+          >
+            Очистить интерфейс
+          </button>
+        </div>
       </div>
+      )}
 
       {showCode && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', width: '80%', height: '80%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <h3>Code Preview</h3>
-              <button onClick={() => setShowCode(false)}>Close</button>
+              <h3>Предпросмотр кода</h3>
+              <button onClick={() => setShowCode(false)}>Закрыть</button>
             </div>
-            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig)} style={{ flex: 1, fontFamily: 'monospace' }} />
-            <div style={{ marginTop: '10px', display: 'flex', gap: '10px' }}>
-              <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Download .ino</button>
+            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs)} style={{ flex: 1, fontFamily: 'monospace' }} />
+            <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Скачать .ino</button>
+              <button
+                onClick={() => {
+                  const stamp = getCreationStamp();
+                  const json = buildImportJson(widgets, canvasConfig, tabs, { activeTabId, projectName: `WebUI_${stamp}` });
+                  const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json;charset=utf-8' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `Flprog_WebUI_${stamp}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                style={{ padding: '10px', backgroundColor: '#8b5cf6', color: 'white', border: 'none', borderRadius: '4px' }}
+              >
+                Скачать JSON
+              </button>
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
                 onClick={() => {
-                  const code = generateArduinoCode(widgets, canvasConfig);
+                  const code = generateArduinoCode(widgets, canvasConfig, tabs);
                   if (navigator.clipboard?.writeText) {
                     navigator.clipboard.writeText(code).then(() => {
                       setCopyToastVisible(true);
@@ -940,15 +1395,55 @@ function App() {
                 }}
                 style={{ padding: '10px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px' }}
               >
-                Copy
+                Копировать
               </button>
+            </div>
+            {simulatorOnline && (
+              <div style={{ marginTop: '16px', padding: '12px', border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+                <div style={{ fontWeight: 600, marginBottom: '6px' }}>Симулятор ESP</div>
+                <button
+                  onClick={sendToSimulator}
+                  disabled={simulatorLoading}
+                  style={{ padding: '8px 12px', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: '4px', cursor: simulatorLoading ? 'wait' : 'pointer' }}
+                >
+                  {simulatorLoading ? 'Отправка…' : 'Отправить проект в симулятор'}
+                </button>
+                {simulatorSuccess && (
+                  <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#059669' }}>
+                    Проект загружен. Откройте <a href={VIEWER_GITHUB_PAGES_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1' }}>вьювер на GitHub Pages</a> и введите адрес {SIMULATOR_URL}
+                  </p>
+                )}
+                {simulatorError && (
+                  <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#dc2626' }}>{simulatorError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {showHelp && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: 'white', width: '90%', maxWidth: 560, maxHeight: '85%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
+              <h3 style={{ margin: 0 }}>Справка — Редактор</h3>
+              <button onClick={() => setShowHelp(false)} style={{ padding: '6px 12px', cursor: 'pointer' }}>Закрыть</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', fontSize: '14px', lineHeight: 1.5 }}>
+              <p><strong>Канва.</strong> В правой панели (Canvas) задаются ширина, высота, пропорции и цвет фона. Пресеты: 16:9, 4:3, 9:16 или свои значения. X, Y, Ш, В виджетов поддерживают проценты (например 50%).</p>
+              <p><strong>Вкладки.</strong> Кнопка «+» добавляет вкладку; переключайтесь по ним и раскладывайте виджеты по экранам.</p>
+              <p><strong>Виджеты.</strong> В левой панели: Кнопка, Переключатель, Слайдер, Поле ввода, LED, Метка, Прямоугольник. Выберите тип — виджет появится на канве. Перетаскивание и ресайз за углы (при выделении). Подпись — в свойстве «Caption».</p>
+              <p><strong>Переменные.</strong> В свойствах виджета укажите «Variable Name». Кнопка, слайдер, поле ввода и переключатель отправляют значение на устройство; LED и метка отображают данные с устройства. Поддерживаются кириллические имена.</p>
+              <p><strong>Генерация кода.</strong> «Сгенерировать код» — предпросмотр и скачивание .ino. «Получить блок (.ubi)» — блок для вставки в проект FLProg.</p>
+              <p><strong>Симулятор.</strong> Запустите <code>npm run simulator</code>, затем «Отправить проект в симулятор». Во вьювере укажите адрес localhost:31337 и подключитесь.</p>
+              <p><strong>Демо-режим.</strong> Кнопка «Демо» — проверка интерфейса на канве без симулятора (кнопки, слайдер, ввод).</p>
+              <p><strong>Копирование.</strong> Ctrl+C по виджету, Ctrl+V — вставка копии (работает и с русской раскладкой).</p>
             </div>
           </div>
         </div>
       )}
       {copyToastVisible && (
         <div className="toast toast-success">
-          Code copied to clipboard
+          Код скопирован в буфер обмена
         </div>
       )}
     </div>
