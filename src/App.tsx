@@ -363,10 +363,10 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
   const [lastCustomRatioString, setLastCustomRatioString] = useState<string | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
 
-  const RATIOS = { pc: [16, 9] as const, tablet: [4, 3] as const, mobile: [9, 16] as const };
+  const RATIOS = { pc: [16, 9] as const, tablet: [4, 3] as const, mobile: [1, 2] as const };
   const proportionValue = (() => {
     const r = canvasConfig.width / canvasConfig.height;
-    const entries: [string, number, number][] = [['pc', 16, 9], ['tablet', 4, 3], ['mobile', 9, 16]];
+    const entries: [string, number, number][] = [['pc', 16, 9], ['tablet', 4, 3], ['mobile', 1, 2]];
     const match = entries.find(([, rw, rh]) => Math.abs(r - rw / rh) < 0.01);
     return match ? match[0] : 'custom';
   })();
@@ -793,7 +793,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
         >
           <option value="pc">ПК (16:9)</option>
           <option value="tablet">Планшет (4:3)</option>
-          <option value="mobile">Мобильный (9:16)</option>
+          <option value="mobile">Мобильный (1:2)</option>
           <option value="custom">Свои значения</option>
         </select>
         {proportionSelectValue === 'custom' && (
@@ -848,8 +848,8 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
       <div
         className="canvas-container"
         style={{
-          marginLeft: demoMode ? 0 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
-          marginRight: demoMode ? 0 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET),
+          marginLeft: demoMode ? 0 : (isMobile ? 2 : (!isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET)),
+          marginRight: demoMode ? 0 : (isMobile ? 2 : (!isMobile && showRightPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET)),
           transition: 'margin 0.2s ease',
         }}
       >
@@ -860,6 +860,57 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
             ['--tab-text' as string]: contrastColor(previewCanvasColor ?? canvasConfig.color),
           }}
         >
+          {isMobile && !demoMode && (
+            <div className="editor-toolbar-row" role="toolbar" aria-label="Инструменты">
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setGridVisible((v) => !v)}
+                title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
+              >
+                Сетка {gridVisible ? '▣' : '☐'}
+              </button>
+              <span className="editor-zoom-wrap">
+                <button
+                  type="button"
+                  className="tab-rename-button"
+                  onClick={() => setZoom(canvasZoom - zoomStep)}
+                  disabled={canvasZoom <= zoomMin}
+                  title="Уменьшить масштаб"
+                >
+                  −
+                </button>
+                <span className="editor-zoom-value" title="Масштаб канвы">
+                  {Math.round(canvasZoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  className="tab-rename-button"
+                  onClick={() => setZoom(canvasZoom + zoomStep)}
+                  disabled={canvasZoom >= zoomMax}
+                  title="Увеличить масштаб"
+                >
+                  +
+                </button>
+              </span>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={enterDemoMode}
+                title="Режим демонстрации"
+              >
+                Демо
+              </button>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setShowHelp(true)}
+                title="Справка"
+              >
+                ?
+              </button>
+            </div>
+          )}
           {tabsInRow ? (
             <div className="tabs-row" role="tablist">
               {tabs.map((tab) => (
@@ -963,53 +1014,57 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
           >
             🗑
           </button>
-          <button
-            type="button"
-            className="tab-rename-button"
-            onClick={() => setGridVisible((v) => !v)}
-            title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
-          >
-            Сетка {gridVisible ? '▣' : '☐'}
-          </button>
-          <span style={{ marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-            <button
-              type="button"
-              className="tab-rename-button"
-              onClick={() => setZoom(canvasZoom - zoomStep)}
-              disabled={canvasZoom <= zoomMin}
-              title="Уменьшить масштаб"
-            >
-              −
-            </button>
-            <span style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
-              {Math.round(canvasZoom * 100)}%
-            </span>
-            <button
-              type="button"
-              className="tab-rename-button"
-              onClick={() => setZoom(canvasZoom + zoomStep)}
-              disabled={canvasZoom >= zoomMax}
-              title="Увеличить масштаб"
-            >
-              +
-            </button>
-          </span>
-          <button
-            type="button"
-            className="tab-rename-button"
-            onClick={enterDemoMode}
-            title="Режим демонстрации"
-          >
-            Демо
-          </button>
-          <button
-            type="button"
-            className="tab-rename-button"
-            onClick={() => setShowHelp(true)}
-            title="Справка"
-          >
-            ?
-          </button>
+          {!isMobile && (
+            <>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setGridVisible((v) => !v)}
+                title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
+              >
+                Сетка {gridVisible ? '▣' : '☐'}
+              </button>
+              <span style={{ marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                <button
+                  type="button"
+                  className="tab-rename-button"
+                  onClick={() => setZoom(canvasZoom - zoomStep)}
+                  disabled={canvasZoom <= zoomMin}
+                  title="Уменьшить масштаб"
+                >
+                  −
+                </button>
+                <span style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
+                  {Math.round(canvasZoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  className="tab-rename-button"
+                  onClick={() => setZoom(canvasZoom + zoomStep)}
+                  disabled={canvasZoom >= zoomMax}
+                  title="Увеличить масштаб"
+                >
+                  +
+                </button>
+              </span>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={enterDemoMode}
+                title="Режим демонстрации"
+              >
+                Демо
+              </button>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setShowHelp(true)}
+                title="Справка"
+              >
+                ?
+              </button>
+            </>
+          )}
             </>
           )}
         </div>
