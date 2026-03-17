@@ -445,6 +445,13 @@ function App() {
     setConnecting(true);
     setConfigJsonString(null);
     const { host, port: p, scheme } = parseHostPort(ip, port);
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && scheme === 'http') {
+      setConnecting(false);
+      setError(
+        'Страница открыта по HTTPS — браузер блокирует доступ к устройству по HTTP. Запустите просмотрщик локально: в папке viewer выполните «npx serve build» и откройте http://localhost:3000'
+      );
+      return;
+    }
     const base = `${scheme}://${host}:${p}`;
     baseUrlRef.current = base;
     try {
