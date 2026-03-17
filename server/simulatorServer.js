@@ -277,6 +277,14 @@ function handleSet(varName, value, res) {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (varName === 'alarm_reset') {
+    if (value === '1' || value === 'true') {
+      project.state.sound_enabled = 0;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   const info = findVarInfo(varName);
   if (!info) {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });

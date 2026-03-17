@@ -1169,6 +1169,9 @@ function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (connected) {
+                      setVar('alarm_reset', '1');
+                    }
                     if (isAlarmPlaying() && !soundOffForCurrentMessage) {
                       stopAlarm();
                       setSoundOffForCurrentMessage(true);

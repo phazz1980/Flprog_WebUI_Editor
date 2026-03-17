@@ -112,7 +112,11 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?:
     ${assign};${extraLine}
   }`;
     })
-    .join('\n');
+    .join('\n')
+    + `
+  else if (varName == "alarm_reset") {
+    alarm_reset = (varVal == "1" || varVal == "true");
+  }`;
 
   const hasSoundEnabledWidget = widgetsWithVars.some(
     (w) => w.varName === 'sound_enabled',
