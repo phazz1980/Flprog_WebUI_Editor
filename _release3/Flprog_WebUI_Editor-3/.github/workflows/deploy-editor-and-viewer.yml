@@ -1,0 +1,38 @@
+# Сборка редактора + просмотрщика и публикация на GitHub Pages
+# Редактор: / , Просмотрщик: /viewer/
+name: Deploy Editor and Viewer
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install editor deps and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install viewer deps
+        run: cd viewer && npm ci
+
+      - name: Build viewer into build/viewer
+        run: node scripts/build-viewer-into-build.js
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build
+          force_orphan: true

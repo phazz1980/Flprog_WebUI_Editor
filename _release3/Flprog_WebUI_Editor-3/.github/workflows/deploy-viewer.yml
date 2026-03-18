@@ -1,0 +1,41 @@
+# Сборка просмотрщика и публикация на GitHub Pages
+name: Deploy Viewer
+
+# Запуск вручную, если нужен только просмотрщик в корне сайта.
+# Для совместного деплоя с редактором используйте workflow "Deploy Editor and Viewer".
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: viewer/package-lock.json
+
+      - name: Install and build viewer
+        env:
+          # Базовый URL для GitHub Pages: https://<owner>.github.io/<repo>/
+          BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          cd viewer
+          npm ci
+          node -e "
+            const p = require('./package.json');
+            p.homepage = process.env.BASE_URL;
+            require('fs').writeFileSync('package.json', JSON.stringify(p, null, 2));
+          "
+          npm run build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./viewer/build
+          force_orphan: true

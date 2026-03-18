@@ -8,7 +8,6 @@ import { parseConfig } from './configParser';
 import { getStateValueByIndex, getSoundEnabled, getUiMessage, displayValue, type StatePayload } from './stateMap';
 import { useViewportSize } from './useViewportSize';
 import { playNotificationOnce, startAlarmLoop, stopAlarm, isAlarmPlaying } from './soundPlayer';
-import { deviceFetch } from './deviceHttp';
 import type { RuntimeWidget } from './types';
 import './App.css';
 
@@ -30,50 +29,12 @@ const LEFT_TOGGLE_OFFSET = 48;
 const POLL_INTERVAL_MS_DEFAULT = 500;
 const POLL_INTERVAL_MS_MIN = 100;
 const POLL_INTERVAL_MS_MAX = 30000;
-/** Таймаут /state: иначе запрос висит, пока МК занят другой вкладкой, и блокирует очередь. */
-const STATE_POLL_TIMEOUT_MS = 8000;
-/** Таймаут /config при подключении: иначе "Подключение" может висеть бесконечно. */
-const CONNECT_CONFIG_TIMEOUT_MS = 8000;
-/** Столько подряд неудачных опросов — только тогда «потеря связи» (одна занятая вкладка не рвёт сессию). */
-const STATE_POLL_FAILS_BEFORE_DISCONNECT = 12;
 const STORAGE_KEY_ADDRESS = 'flprog_viewer_address';
 const STORAGE_KEY_POLL_INTERVAL = 'flprog_viewer_poll_interval';
-const STORAGE_KEY_SCAN_SETTINGS = 'flprog_viewer_scan_settings';
 
 /** Адрес эмулятора по умолчанию (npm run simulator) */
 const DEFAULT_EMULATOR_HOST = 'localhost';
 const DEFAULT_EMULATOR_PORT = '31337';
-/** Порт info-страницы на МК (ссылки/справка). По нему делаем "поиск МК". */
-const DEVICE_INFO_PORT = 80;
-
-type ScanResult = { host: string; infoPort: number; apiPort?: number; title?: string };
-
-const SCAN_CONCURRENCY_DEFAULT = 16;
-const SCAN_CONCURRENCY_MIN = 1;
-const SCAN_CONCURRENCY_MAX = 64;
-const SCAN_TIMEOUT_MS_DEFAULT = 1000;
-const SCAN_TIMEOUT_MS_MIN = 50;
-const SCAN_TIMEOUT_MS_MAX = 10000;
-
-type ScanSettings = {
-  prefix: string;
-  from: number;
-  to: number;
-  concurrency: number;
-  timeoutMs: number;
-};
-
-type MkErrorKind = 'alarm' | 'notify' | 'message';
-type MkErrorLogItem = {
-  at: number; // client timestamp (ms)
-  kind: MkErrorKind;
-  soundEnabled: 0 | 1 | 2;
-  message: string;
-};
-
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
 
 function loadSavedAddress(): { ip: string; port: string } {
   try {
@@ -116,83 +77,6 @@ function savePollInterval(ms: number) {
   } catch {
     // ignore
   }
-}
-
-function loadSavedScanSettings(): ScanSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_SCAN_SETTINGS);
-    // По умолчанию начинаем с .2: .1 обычно шлюз/роутер и даёт CORS/404-шум в консоли.
-    if (!raw) return { prefix: '', from: 2, to: 254, concurrency: SCAN_CONCURRENCY_DEFAULT, timeoutMs: SCAN_TIMEOUT_MS_DEFAULT };
-    const parsed = JSON.parse(raw);
-    const prefix = typeof parsed?.prefix === 'string' ? parsed.prefix : '';
-    const from = Number.isFinite(parsed?.from) ? Number(parsed.from) : 1;
-    const to = Number.isFinite(parsed?.to) ? Number(parsed.to) : 254;
-    const concurrencyRaw = Number.isFinite(parsed?.concurrency) ? Number(parsed.concurrency) : SCAN_CONCURRENCY_DEFAULT;
-    const timeoutRaw = Number.isFinite(parsed?.timeoutMs) ? Number(parsed.timeoutMs) : SCAN_TIMEOUT_MS_DEFAULT;
-    return {
-      prefix,
-      from: Math.max(0, Math.min(255, Math.trunc(from))),
-      to: Math.max(0, Math.min(255, Math.trunc(to))),
-      concurrency: Math.max(SCAN_CONCURRENCY_MIN, Math.min(SCAN_CONCURRENCY_MAX, Math.trunc(concurrencyRaw))),
-      timeoutMs: Math.max(SCAN_TIMEOUT_MS_MIN, Math.min(SCAN_TIMEOUT_MS_MAX, Math.trunc(timeoutRaw))),
-    };
-  } catch {
-    return { prefix: '', from: 2, to: 254, concurrency: SCAN_CONCURRENCY_DEFAULT, timeoutMs: SCAN_TIMEOUT_MS_DEFAULT };
-  }
-}
-
-function saveScanSettings(prefix: string, from: number, to: number, concurrency: number, timeoutMs: number) {
-  try {
-    localStorage.setItem(STORAGE_KEY_SCAN_SETTINGS, JSON.stringify({ prefix, from, to, concurrency, timeoutMs }));
-  } catch {
-    // ignore
-  }
-}
-
-function guessIpv4Prefix(hostOrIp: string): string {
-  const m = /^\s*(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\s*$/.exec(hostOrIp);
-  if (!m) return '';
-  const a = Number(m[1]), b = Number(m[2]), c = Number(m[3]);
-  if ([a, b, c].some((x) => !Number.isFinite(x) || x < 0 || x > 255)) return '';
-  return `${a}.${b}.${c}`;
-}
-
-async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
-  const ac = new AbortController();
-  const timer = window.setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { cache: 'no-store', signal: ac.signal, headers: { Connection: 'close' } as any });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
-function parseDeviceInfoHtml(html: string): { apiPort?: number; title?: string } | null {
-  // Страница генерируется в src/generator.ts (buildDeviceRootHtml). Используем несколько сигнатур.
-  const looksLikeFlprog =
-    /ESP32 Web UI\s*\(Flprog_Ethernet\)/i.test(html) ||
-    /Flprog Web UI/i.test(html) ||
-    /вьювер подключайте к/i.test(html) ||
-    /apiP\s*=\s*['"]\d+['"]/i.test(html);
-  if (!looksLikeFlprog) return null;
-
-  const title = (/<title>([^<]{1,200})<\/title>/i.exec(html)?.[1] ?? '').trim() || undefined;
-
-  // Внутри скрипта: var apiP = '8080';
-  const apiPortFromScript = /apiP\s*=\s*['"](\d{2,5})['"]/i.exec(html)?.[1];
-  // В тексте: "вьювер подключайте к :8080"
-  const apiPortFromText = /вьювер подключайте к\s*<code>:(\d{2,5})<\/code>/i.exec(html)?.[1];
-  const apiPortStr = apiPortFromScript ?? apiPortFromText;
-  const apiPort = apiPortStr ? Number(apiPortStr) : undefined;
-  const apiPortValid = apiPort != null && Number.isFinite(apiPort) && apiPort > 0 && apiPort <= 65535 ? apiPort : undefined;
-  return { apiPort: apiPortValid, title };
-}
-
-function isPingResponse(text: string): boolean {
-  // Генератор прошивки (src/generator.ts) отдаёт "ESP32-WEBUI" в /ping.
-  return /ESP32-WEBUI/i.test(text) || /FLPROG/i.test(text);
 }
 
 /** Читает из URL параметры ?host=...&port=...&connect=1 для встраивания в редактор. */
@@ -238,14 +122,12 @@ function ViewerWidget({
   canvasBgColor,
   onSetVar,
   onInputClick,
-  isSwitchPendingAck,
 }: {
   widget: RuntimeWidget;
   displayText: string;
   canvasBgColor: string;
   onSetVar?: (varName: string, value: string, opts?: { widgetId: string; previousValue: string }) => void;
   onInputClick?: (widget: RuntimeWidget, currentValue: string) => void;
-  isSwitchPendingAck?: boolean;
 }) {
   const shapeRef = useRef<Konva.Group>(null);
   const lw = widget.width;
@@ -361,11 +243,8 @@ function ViewerWidget({
               ? (displayText === '1' ? '#22c55e' : '#e5e7eb')
               : widget.color
           }
-          opacity={widget.type === 'switch' && isSwitchPendingAck ? 0.55 : 1}
-          stroke={
-            widget.type === 'input' ? '#ddd' : widget.type === 'switch' && isSwitchPendingAck ? '#f59e0b' : undefined
-          }
-          strokeWidth={widget.type === 'input' ? 1 : widget.type === 'switch' && isSwitchPendingAck ? 2 : 0}
+          stroke={widget.type === 'input' ? '#ddd' : undefined}
+          strokeWidth={widget.type === 'input' ? 1 : 0}
           cornerRadius={
             widget.type === 'button' ? 5
             : widget.type === 'input' ? 2
@@ -381,7 +260,6 @@ function ViewerWidget({
           x={displayText === '1' ? lw - lh / 2 : lh / 2}
           y={lh / 2}
           fill="#ffffff"
-          opacity={isSwitchPendingAck ? 0.65 : 1}
           shadowBlur={4}
           shadowColor="rgba(0,0,0,0.15)"
           listening={false}
@@ -464,7 +342,6 @@ function App() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectAbortRef = useRef<AbortController | null>(null);
 
   const [tabIds, setTabIds] = useState<string[]>([]);
   const [tabNames, setTabNames] = useState<string[]>([]);
@@ -489,7 +366,7 @@ function App() {
   const [switchDisplayOverrides, setSwitchDisplayOverrides] = useState<Record<string, string>>({});
   const [switchRevertOverrides, setSwitchRevertOverrides] = useState<Record<string, string>>({});
   const pendingSwitchRef = useRef<{ id: string; value: string; previousValue: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
-  const SWITCH_RESPONSE_WAIT_MS = 2000;
+  const SWITCH_RESPONSE_WAIT_MS = 1000;
 
   const [focusedInputWidget, setFocusedInputWidget] = useState<RuntimeWidget | null>(null);
   const [inputOverlayValue, setInputOverlayValue] = useState('');
@@ -513,29 +390,6 @@ function App() {
   const tabPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const tabPickerDropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  // Журнал сообщений/ошибок, приходящих от МК (по ui_message + sound_enabled).
-  const [mkErrorHistory, setMkErrorHistory] = useState<MkErrorLogItem[]>([]);
-  const [mkErrorLastAt, setMkErrorLastAt] = useState<number | null>(null);
-  const [mkErrorLogOpen, setMkErrorLogOpen] = useState(false);
-
-  // Поиск МК (сканирование по HTTP на info-порту).
-  const savedScan = useRef(loadSavedScanSettings());
-  const [scanOpen, setScanOpen] = useState(false);
-  const [scanPrefix, setScanPrefix] = useState(() =>
-    savedScan.current.prefix ||
-    guessIpv4Prefix(saved.ip) ||
-    guessIpv4Prefix(urlParamsRef.current.host ?? '') ||
-    ''
-  );
-  const [scanFrom, setScanFrom] = useState(() => savedScan.current.from);
-  const [scanTo, setScanTo] = useState(() => savedScan.current.to);
-  const [scanConcurrency, setScanConcurrency] = useState(() => savedScan.current.concurrency);
-  const [scanTimeoutMs, setScanTimeoutMs] = useState(() => savedScan.current.timeoutMs);
-  const [scanResults, setScanResults] = useState<ScanResult[]>([]);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const scanAbortRef = useRef<AbortController | null>(null);
 
   useLayoutEffect(() => {
     if (!tabPickerOpen || !tabPickerTriggerRef.current) {
@@ -563,8 +417,6 @@ function App() {
 
   const disconnect = useCallback(() => {
     stopAlarm();
-    connectAbortRef.current?.abort();
-    connectAbortRef.current = null;
     setAutoReconnect(false);
     setConnected(false);
     setConnecting(false);
@@ -572,10 +424,6 @@ function App() {
     setReconnectCountdown(null);
     setFocusedInputWidget(null);
     setInputOverlayValue('');
-    prevUiMessageRef.current = '';
-    setMkErrorHistory([]);
-    setMkErrorLastAt(null);
-    setMkErrorLogOpen(false);
     baseUrlRef.current = null;
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -600,12 +448,7 @@ function App() {
     const base = `${scheme}://${host}:${p}`;
     baseUrlRef.current = base;
     try {
-      connectAbortRef.current?.abort();
-      const ac = new AbortController();
-      connectAbortRef.current = ac;
-      const timer = window.setTimeout(() => ac.abort(), CONNECT_CONFIG_TIMEOUT_MS);
-      const res = await deviceFetch(`${base}/config`, { signal: ac.signal });
-      window.clearTimeout(timer);
+      const res = await fetch(`${base}/config`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       setConfigJsonString(text);
@@ -624,151 +467,17 @@ function App() {
       setState({});
       setConnected(true);
       setConnecting(false);
-      connectAbortRef.current = null;
       saveAddress(host, p);
       if (ip !== host || port !== p) {
         setIp(host);
         setPort(p);
       }
     } catch (e: any) {
-      const isAbort = e?.name === 'AbortError';
-      setError(isAbort ? `Таймаут подключения (${CONNECT_CONFIG_TIMEOUT_MS} мс)` : (e?.message || 'Не удалось подключиться'));
+      setError(e?.message || 'Не удалось подключиться');
       setConnecting(false);
       setConnected(false);
-      connectAbortRef.current = null;
     }
   }, [ip, port]);
-
-  const connectToFoundDevice = useCallback(async (host: string, apiPort?: number) => {
-    setScanOpen(false);
-    scanAbortRef.current?.abort();
-    scanAbortRef.current = null;
-    setScanning(false);
-
-    setAutoReconnect(true);
-    setError(null);
-    setReconnectCountdown(null);
-    setConnecting(true);
-    setConfigJsonString(null);
-
-    // Если API-порт не известен (на :80 есть только /ping), пробуем несколько типовых портов.
-    const portsToTry = Array.from(
-      new Set([apiPort, 8080, 80, 8000, 3000].filter((x): x is number => typeof x === 'number' && Number.isFinite(x)))
-    );
-    if (portsToTry.length === 0) portsToTry.push(8080);
-
-    for (const pNum of portsToTry) {
-      const p = String(pNum);
-      const base = `http://${host}:${p}`;
-      baseUrlRef.current = base;
-      try {
-        connectAbortRef.current?.abort();
-        const ac = new AbortController();
-        connectAbortRef.current = ac;
-        const timer = window.setTimeout(() => ac.abort(), CONNECT_CONFIG_TIMEOUT_MS);
-        const res = await deviceFetch(`${base}/config`, { signal: ac.signal });
-        window.clearTimeout(timer);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        setConfigJsonString(text);
-        const raw = JSON.parse(text);
-        const parsed = parseConfig(raw);
-        if (!parsed) throw new Error('Неверный формат /config');
-        setTabIds(parsed.tabIds);
-        setTabNames(parsed.tabNames);
-        setWidgets(parsed.widgets);
-        setCanvasWidth(parsed.canvasWidth);
-        setCanvasHeight(parsed.canvasHeight);
-        setCanvasColor(parsed.canvasColor);
-        setActiveTabIndex(0);
-        setState({});
-        setConnected(true);
-        setConnecting(false);
-        connectAbortRef.current = null;
-
-        setIp(host);
-        setPort(p);
-        saveAddress(host, p);
-        return;
-      } catch {
-        // пробуем следующий порт
-      }
-    }
-
-    setError('Не найден API: /config недоступен (пробовал 8080/80/8000/3000).');
-    setConnecting(false);
-    setConnected(false);
-    connectAbortRef.current = null;
-  }, []);
-
-  const startScan = useCallback(async () => {
-    setScanError(null);
-    setScanResults([]);
-    const prefix = scanPrefix.trim();
-    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(prefix)) {
-      setScanError('Укажите префикс подсети в формате 192.168.1');
-      return;
-    }
-    const parts = prefix.split('.').map((x) => Number(x));
-    if (parts.some((x) => !Number.isFinite(x) || x < 0 || x > 255)) {
-      setScanError('Неверный префикс подсети');
-      return;
-    }
-
-    const from = Math.max(0, Math.min(255, Math.trunc(scanFrom)));
-    const to = Math.max(0, Math.min(255, Math.trunc(scanTo)));
-    const lo = Math.min(from, to);
-    const hi = Math.max(from, to);
-    const concurrency = Math.max(SCAN_CONCURRENCY_MIN, Math.min(SCAN_CONCURRENCY_MAX, Math.trunc(scanConcurrency)));
-    const timeoutMs = Math.max(SCAN_TIMEOUT_MS_MIN, Math.min(SCAN_TIMEOUT_MS_MAX, Math.trunc(scanTimeoutMs)));
-    saveScanSettings(prefix, lo, hi, concurrency, timeoutMs);
-    if (scanConcurrency !== concurrency) setScanConcurrency(concurrency);
-    if (scanTimeoutMs !== timeoutMs) setScanTimeoutMs(timeoutMs);
-
-    scanAbortRef.current?.abort();
-    const ac = new AbortController();
-    scanAbortRef.current = ac;
-    setScanning(true);
-    try {
-      const candidates: number[] = [];
-      for (let i = lo; i <= hi; i++) candidates.push(i);
-
-      const CONCURRENCY = concurrency;
-      const TIMEOUT_MS = timeoutMs;
-      let idx = 0;
-      const found: ScanResult[] = [];
-
-      const worker = async () => {
-        while (idx < candidates.length && !ac.signal.aborted) {
-          const last = candidates[idx++];
-          const host = `${prefix}.${last}`;
-          try {
-            const pingText = await fetchTextWithTimeout(`http://${host}:${DEVICE_INFO_PORT}/ping`, TIMEOUT_MS);
-            if (!isPingResponse(pingText)) continue;
-
-            // Пинг есть — устройство "похоже на Flprog". Дополнительное чтение "/" часто упирается в CORS
-            // (роутеры/камеры/чужие веб-морды), поэтому не трогаем "/" и не засоряем консоль ошибками.
-            found.push({ host, infoPort: DEVICE_INFO_PORT });
-            setScanResults([...found].sort((a, b) => a.host.localeCompare(b.host, 'en')));
-          } catch {
-            // ignore
-          }
-        }
-      };
-
-      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
-      setScanResults([...found].sort((a, b) => a.host.localeCompare(b.host, 'en')));
-    } finally {
-      setScanning(false);
-      if (scanAbortRef.current === ac) scanAbortRef.current = null;
-    }
-  }, [scanPrefix, scanFrom, scanTo]);
-
-  const stopScan = useCallback(() => {
-    scanAbortRef.current?.abort();
-    scanAbortRef.current = null;
-    setScanning(false);
-  }, []);
 
   const toggleConnection = useCallback(() => {
     if (autoReconnect) {
@@ -783,52 +492,28 @@ function App() {
   useEffect(() => {
     if (didAutoConnectRef.current || !urlParamsRef.current.connect) return;
     didAutoConnectRef.current = true;
-    // Автоподключение по connect=1 должно быть одноразовым: после первого срабатывания
-    // убираем connect из URL, чтобы Ctrl+F5/перезагрузка не вызывали повторный автоконнект.
-    try {
-      const u = new URL(window.location.href);
-      u.searchParams.delete('connect');
-      window.history.replaceState(null, document.title, u.toString());
-    } catch {
-      // ignore
-    }
     connect();
   }, [connect]);
 
-  const pollInFlightRef = useRef(false);
-  const pollFailStreakRef = useRef(0);
   useEffect(() => {
     if (!connected || !baseUrlRef.current) return;
-    pollFailStreakRef.current = 0;
     const base = baseUrlRef.current;
     const interval = Math.max(POLL_INTERVAL_MS_MIN, Math.min(POLL_INTERVAL_MS_MAX, pollIntervalMs));
-    const dropConnection = () => {
-      stopAlarm();
-      setError('Соединение потеряно');
-      setConnected(false);
-    };
     const poll = async () => {
-      if (pollInFlightRef.current) return;
-      pollInFlightRef.current = true;
-      const ac = new AbortController();
-      const timer = window.setTimeout(() => ac.abort(), STATE_POLL_TIMEOUT_MS);
       try {
-        const res = await deviceFetch(`${base}/state?fmt=short`, { signal: ac.signal });
-        window.clearTimeout(timer);
+        const res = await fetch(`${base}/state?fmt=short`);
         if (!res.ok) {
-          pollFailStreakRef.current += 1;
-          if (pollFailStreakRef.current >= STATE_POLL_FAILS_BEFORE_DISCONNECT) dropConnection();
+          stopAlarm();
+          setError('Соединение потеряно');
+          setConnected(false);
           return;
         }
         const data = await res.json();
-        pollFailStreakRef.current = 0;
         setState(data);
       } catch {
-        window.clearTimeout(timer);
-        pollFailStreakRef.current += 1;
-        if (pollFailStreakRef.current >= STATE_POLL_FAILS_BEFORE_DISCONNECT) dropConnection();
-      } finally {
-        pollInFlightRef.current = false;
+        stopAlarm();
+        setError('Соединение потеряно');
+        setConnected(false);
       }
     };
     poll();
@@ -867,7 +552,7 @@ function App() {
     const base = baseUrlRef.current;
     if (!base) return;
     try {
-      await deviceFetch(`${base}/set?var=${encodeURIComponent(varName)}&value=${encodeURIComponent(value)}`);
+      await fetch(`${base}/set?var=${encodeURIComponent(varName)}&value=${encodeURIComponent(value)}`);
     } catch {
       // ignore
     }
@@ -876,29 +561,26 @@ function App() {
   type SetVarOpts = { widgetId: string; previousValue: string };
   const handleSetVar = useCallback((varName: string, value: string, opts?: SetVarOpts) => {
     if (opts?.widgetId != null) {
-      const widgetId = opts.widgetId;
-      const previousValue = opts.previousValue;
-      setSwitchDisplayOverrides((prev) => ({ ...prev, [widgetId]: value }));
+      setSwitchDisplayOverrides((prev) => ({ ...prev, [opts!.widgetId]: value }));
       setVar(varName, value);
-      // Для switch показываем оптимистичное значение, но если за 1 секунду не увидим подтверждение из /state
-      // — возвращаемся к значению из последнего опроса.
-      if (pendingSwitchRef.current) clearTimeout(pendingSwitchRef.current.timeoutId);
+      if (pendingSwitchRef.current) {
+        clearTimeout(pendingSwitchRef.current.timeoutId);
+        pendingSwitchRef.current = null;
+      }
       const timeoutId = setTimeout(() => {
-        if (pendingSwitchRef.current?.id === widgetId) {
+        if (pendingSwitchRef.current?.id === opts!.widgetId) {
+          const prevVal = pendingSwitchRef.current.previousValue;
           pendingSwitchRef.current = null;
+          setVar(varName, prevVal);
+          setSwitchRevertOverrides((prev) => ({ ...prev, [opts!.widgetId]: prevVal }));
           setSwitchDisplayOverrides((prev) => {
             const next = { ...prev };
-            delete next[widgetId];
-            return next;
-          });
-          setSwitchRevertOverrides((prev) => {
-            const next = { ...prev };
-            delete next[widgetId];
+            delete next[opts!.widgetId];
             return next;
           });
         }
       }, SWITCH_RESPONSE_WAIT_MS);
-      pendingSwitchRef.current = { id: widgetId, value, previousValue, timeoutId };
+      pendingSwitchRef.current = { id: opts.widgetId, value, previousValue: opts.previousValue, timeoutId };
     } else {
       setVar(varName, value);
     }
@@ -909,12 +591,6 @@ function App() {
   const soundEnabled = connected ? getSoundEnabled(state) : 0;
 
   const MESSAGE_BAR_HEIGHT = 44;
-  const mkUiMessage = connected ? getUiMessage(state) : '';
-  const mkCurrentMessage = connected && !messageClearedByUser ? (mkUiMessage || '—') : '—';
-  const mkCurrentTimeLabel =
-    mkCurrentMessage !== '—' && mkErrorLastAt != null && connected && !messageClearedByUser
-      ? formatTime(mkErrorLastAt)
-      : null;
   const sidebarOffset = !isMobile && showLeftPanel ? SIDEBAR_WIDTH + CANVAS_PANEL_GAP : LEFT_TOGGLE_OFFSET;
   const availableW = isMobile ? Math.max(100, viewportW - 2) : Math.max(100, viewportW - sidebarOffset - 40);
   const availableH = Math.max(100, viewportH - 67);
@@ -1065,33 +741,32 @@ function App() {
     const { id, value } = pendingSwitchRef.current;
     const w = widgets.find((x) => x.id === id);
     if (!w || w.stateIndex < 0) return;
-    const toSwitchStr = (raw: StatePayload | undefined): string => {
-      if (raw === undefined) return '';
-      if (typeof raw === 'boolean') return raw ? '1' : '0';
-      if (typeof raw === 'number') return raw !== 0 ? '1' : '0';
-      return String(raw).toLowerCase() === 'true' || String(raw) === '1' ? '1' : '0';
-    };
-
-    // Для switch отображаемое значение берём из *_out (stateIndex), поэтому подтверждение
-    // считаем полученным, когда совпал именно out-слот.
-    const outIdx = w.stateIndex;
-    const outRaw = getStateValueByIndex(state, outIdx);
-    const currentOutStr = toSwitchStr(outRaw);
-
-    if (currentOutStr !== value) return;
-
-    clearTimeout(pendingSwitchRef.current.timeoutId);
-    pendingSwitchRef.current = null;
-    setSwitchRevertOverrides((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setSwitchDisplayOverrides((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    const responseIdx = w.responseStateIndex ?? w.stateIndex;
+    const raw = getStateValueByIndex(state, responseIdx);
+    const currentStr =
+      raw === undefined
+        ? ''
+        : typeof raw === 'boolean'
+          ? raw ? '1' : '0'
+          : typeof raw === 'number'
+            ? raw !== 0 ? '1' : '0'
+            : String(raw).toLowerCase() === 'true' || String(raw) === '1'
+              ? '1'
+              : '0';
+    if (currentStr === value) {
+      clearTimeout(pendingSwitchRef.current.timeoutId);
+      pendingSwitchRef.current = null;
+      setSwitchRevertOverrides((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setSwitchDisplayOverrides((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
   }, [state, widgets]);
 
   // Звук: сравниваем сообщение (ui_message); если изменилось — включаем звук в соответствии с sound_enabled (2 = авария, 1 = уведомление). Аларм имеет приоритет.
@@ -1100,17 +775,9 @@ function App() {
     const uiMessage = getUiMessage(state);
     const soundEnabled = getSoundEnabled(state);
     if (uiMessage !== prevUiMessageRef.current) {
-      const at = Date.now();
-      const trimmed = uiMessage.trim();
       setSoundOffForCurrentMessage(false);
       setMessageClearedByUser(false);
       prevUiMessageRef.current = uiMessage;
-      // Логируем только непустые сообщения от МК, чтобы журнал не был мусором.
-      if (trimmed) {
-        const kind: MkErrorKind = soundEnabled === 2 ? 'alarm' : soundEnabled === 1 ? 'notify' : 'message';
-        setMkErrorLastAt(at);
-        setMkErrorHistory((prev) => [{ at, kind, soundEnabled, message: uiMessage }, ...prev].slice(0, 10));
-      }
     } else {
       return;
     }
@@ -1194,25 +861,6 @@ function App() {
           placeholder="31337"
           style={{ width: '100%', marginBottom: 12, padding: '6px 8px', boxSizing: 'border-box' }}
         />
-        <button
-          type="button"
-          onClick={() => setScanOpen(true)}
-          disabled={connecting || scanning}
-          style={{
-            width: '100%',
-            padding: '8px 10px',
-            marginBottom: 12,
-            backgroundColor: '#0f766e',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 4,
-            cursor: connecting || scanning ? 'wait' : 'pointer',
-            fontWeight: 600,
-          }}
-          title={`Поиск устройств в сети (HTTP :${DEVICE_INFO_PORT})`}
-        >
-          Найти МК (порт {DEVICE_INFO_PORT})
-        </button>
         <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Интервал обновления (мс)</label>
         <input
           type="number"
@@ -1230,7 +878,7 @@ function App() {
         <button
           type="button"
           onClick={toggleConnection}
-          disabled={false}
+          disabled={connecting}
           style={{
             width: '100%',
             padding: 10,
@@ -1242,7 +890,7 @@ function App() {
             fontWeight: 600,
           }}
         >
-          {autoReconnect ? (connecting ? 'Отменить' : 'Отключиться') : 'Подключиться'}
+          {autoReconnect ? 'Отключиться' : 'Подключиться'}
         </button>
         {error != null && (
           <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>
@@ -1252,11 +900,6 @@ function App() {
         {reconnectCountdown != null && reconnectCountdown > 0 && (
           <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
             Повтор через {reconnectCountdown} сек
-          </p>
-        )}
-        {connected && (
-          <p style={{ fontSize: 11, color: '#64748b', marginTop: 10, lineHeight: 1.35 }}>
-            Не открывайте в другой вкладке страницу <code style={{ fontSize: 10 }}>http://IP_МК/</code> — МК принимает одно соединение; опрос может подвисать.
           </p>
         )}
         {showDebugPanel ? (
@@ -1438,14 +1081,7 @@ function App() {
                 <Layer listening={true}>
                   <Group scaleX={scale} scaleY={scale} listening={true}>
                     {visibleWidgets.map((w) => {
-                      // Для switch в реальном устройстве часто логика "дергается" по *_out,
-                      // поэтому отображение берём из первой (out) переменной.
-                      const stateIdx =
-                        w.stateIndex >= 0
-                          ? w.type === 'switch'
-                            ? w.stateIndex
-                            : (w.responseStateIndex ?? w.stateIndex)
-                          : -1;
+                      const stateIdx = w.stateIndex >= 0 ? (w.responseStateIndex ?? w.stateIndex) : -1;
                       const rawVal = stateIdx >= 0 ? getStateValueByIndex(state, stateIdx) : undefined;
                       let displayText = displayValue(w, rawVal, w.text ?? '');
                       if (w.type === 'slider') {
@@ -1463,7 +1099,6 @@ function App() {
                           canvasBgColor={canvasColor}
                           onSetVar={connected ? handleSetVar : undefined}
                           onInputClick={connected ? handleInputWidgetClick : undefined}
-                      isSwitchPendingAck={w.type === 'switch' ? pendingSwitchRef.current?.id === w.id : undefined}
                         />
                       );
                     })}
@@ -1506,7 +1141,6 @@ function App() {
               style={{
                 height: MESSAGE_BAR_HEIGHT,
                 minHeight: MESSAGE_BAR_HEIGHT,
-                position: 'relative',
                 padding: '8px 10px',
                 boxSizing: 'border-box',
                 borderTop: '1px solid #64748b',
@@ -1522,18 +1156,12 @@ function App() {
               }}
             >
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
-                {mkCurrentMessage}
+                {connected && !messageClearedByUser ? (getUiMessage(state) || '—') : '—'}
               </span>
-              {mkCurrentTimeLabel && (
-                <span style={{ fontSize: 11, color: '#64748b', whiteSpace: 'nowrap' }}>{mkCurrentTimeLabel}</span>
-              )}
               {(soundEnabled === 2 || isAlarmPlaying() || (connected && getUiMessage(state))) && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (connected) {
-                      setVar('alarm_reset', '1');
-                    }
                     if (isAlarmPlaying() && !soundOffForCurrentMessage) {
                       stopAlarm();
                       setSoundOffForCurrentMessage(true);
@@ -1572,91 +1200,6 @@ function App() {
                   )}
                 </button>
               )}
-
-              {mkErrorHistory.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setMkErrorLogOpen((v) => !v)}
-                  style={{
-                    padding: '6px 10px',
-                    backgroundColor: '#e5e7eb',
-                    color: '#111827',
-                    border: 'none',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    fontWeight: 600,
-                    flexShrink: 0,
-                  }}
-                  title="Журнал ошибок/сообщений от МК"
-                >
-                  Журнал ({mkErrorHistory.length})
-                </button>
-              )}
-
-              {mkErrorLogOpen && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    bottom: MESSAGE_BAR_HEIGHT + 8,
-                    backgroundColor: '#0f172a',
-                    color: '#e2e8f0',
-                    border: '1px solid rgba(148, 163, 184, 0.35)',
-                    borderRadius: 8,
-                    padding: 12,
-                    zIndex: 1000,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-                    maxHeight: 240,
-                    overflowY: 'auto',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                    <div style={{ fontWeight: 800, fontSize: 13 }}>Журнал ошибок (последние 10)</div>
-                    <button
-                      type="button"
-                      onClick={() => setMkErrorLogOpen(false)}
-                      style={{
-                        padding: '4px 10px',
-                        backgroundColor: '#334155',
-                        color: '#e2e8f0',
-                        border: 'none',
-                        borderRadius: 6,
-                        cursor: 'pointer',
-                        fontWeight: 700,
-                      }}
-                      title="Закрыть"
-                    >
-                      Закрыть
-                    </button>
-                  </div>
-
-                  {mkErrorHistory.length === 0 ? (
-                    <div style={{ color: '#94a3b8', fontSize: 12 }}>—</div>
-                  ) : (
-                    mkErrorHistory.map((item, idx) => {
-                      const kindColor = item.kind === 'alarm' ? '#dc2626' : item.kind === 'notify' ? '#0ea5e9' : '#94a3b8';
-                      return (
-                        <div
-                          key={`${item.at}-${idx}`}
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                            backgroundColor: 'rgba(255,255,255,0.06)',
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-                            <span style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>{formatTime(item.at)}</span>
-                            <span style={{ fontSize: 11, color: kindColor, fontWeight: 900 }}>{item.kind.toUpperCase()}</span>
-                          </div>
-                          <div style={{ fontSize: 12, marginTop: 3, wordBreak: 'break-word' }}>{item.message}</div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -1671,189 +1214,10 @@ function App() {
             </div>
             <div style={{ flex: 1, overflow: 'auto', fontSize: '14px', lineHeight: 1.5 }}>
               <p><strong>Подключение.</strong> Введите IP и порт устройства с прошивкой Flprog WebServer (или <code>localhost:31337</code> для симулятора). Формат: <code>192.168.1.1</code>, <code>host:port</code> или <code>http://host:port</code>. Кнопка «Подключиться» загружает конфиг и начинает опрос состояния.</p>
-              <p><strong>Вторая вкладка.</strong> Страница МК в браузере (<code>http://IP/</code>) — отдельное соединение; пока она грузится, вьювер может ждать. Не открывайте её параллельно с работой панели или закройте вкладку.</p>
               <p><strong>Вкладки.</strong> Переключайте экраны по вкладкам, как в редакторе.</p>
               <p><strong>Управление.</strong> Кнопки и переключатели отправляют команды на устройство. Слайдер и поле ввода — при изменении значения. LED и метки отображают данные с устройства.</p>
               <p><strong>Звук.</strong> Поддерживаются уведомление и тревога. При тревоге доступна кнопка «Выключить тревогу».</p>
               <p><strong>Интервал обновления.</strong> Частота опроса состояния (мс). Можно уменьшить для быстрого отклика или увеличить для экономии трафика.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {scanOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ backgroundColor: 'white', width: '92%', maxWidth: 720, maxHeight: '85%', borderRadius: 8, display: 'flex', flexDirection: 'column', padding: 18, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexShrink: 0 }}>
-              <h3 style={{ margin: 0 }}>Поиск МК (HTTP :{DEVICE_INFO_PORT})</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  stopScan();
-                  setScanOpen(false);
-                }}
-                style={{ padding: '6px 12px', cursor: 'pointer' }}
-              >
-                Закрыть
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 120px', gap: 10, alignItems: 'end', flexShrink: 0 }}>
-              <div>
-                <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Подсеть (префикс)</label>
-                <input
-                  type="text"
-                  value={scanPrefix}
-                  onChange={(e) => setScanPrefix(e.target.value)}
-                  placeholder="192.168.1"
-                  style={{ width: '100%', padding: '6px 8px', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>От</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={255}
-                  value={scanFrom}
-                  onChange={(e) => setScanFrom(parseInt(e.target.value || '0', 10))}
-                  style={{ width: '100%', padding: '6px 8px', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>До</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={255}
-                  value={scanTo}
-                  onChange={(e) => setScanTo(parseInt(e.target.value || '0', 10))}
-                  style={{ width: '100%', padding: '6px 8px', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10, alignItems: 'end', flexShrink: 0 }}>
-              <div>
-                <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Параллельность</label>
-                <input
-                  type="number"
-                  min={SCAN_CONCURRENCY_MIN}
-                  max={SCAN_CONCURRENCY_MAX}
-                  step={1}
-                  value={scanConcurrency}
-                  onChange={(e) => {
-                    const v = e.target.value === '' ? SCAN_CONCURRENCY_DEFAULT : parseInt(e.target.value, 10);
-                    if (Number.isFinite(v)) setScanConcurrency(Math.max(SCAN_CONCURRENCY_MIN, Math.min(SCAN_CONCURRENCY_MAX, v)));
-                  }}
-                  style={{ width: '100%', padding: '6px 8px', boxSizing: 'border-box' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Таймаут /ping (мс)</label>
-                <input
-                  type="number"
-                  min={SCAN_TIMEOUT_MS_MIN}
-                  max={SCAN_TIMEOUT_MS_MAX}
-                  step={50}
-                  value={scanTimeoutMs}
-                  onChange={(e) => {
-                    const v = e.target.value === '' ? SCAN_TIMEOUT_MS_DEFAULT : parseInt(e.target.value, 10);
-                    if (Number.isFinite(v)) setScanTimeoutMs(Math.max(SCAN_TIMEOUT_MS_MIN, Math.min(SCAN_TIMEOUT_MS_MAX, v)));
-                  }}
-                  style={{ width: '100%', padding: '6px 8px', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 12, flexShrink: 0, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!scanPrefix.trim()) {
-                    const guessed = guessIpv4Prefix(ip);
-                    if (guessed) setScanPrefix(guessed);
-                  }
-                  startScan();
-                }}
-                disabled={scanning}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: scanning ? '#94a3b8' : '#0f766e',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: scanning ? 'wait' : 'pointer',
-                  fontWeight: 600,
-                }}
-              >
-                {scanning ? 'Идёт поиск…' : 'Начать поиск'}
-              </button>
-              <button
-                type="button"
-                onClick={stopScan}
-                disabled={!scanning}
-                style={{
-                  padding: '8px 12px',
-                  backgroundColor: !scanning ? '#e2e8f0' : '#475569',
-                  color: !scanning ? '#334155' : '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: !scanning ? 'default' : 'pointer',
-                  fontWeight: 600,
-                }}
-              >
-                Остановить
-              </button>
-              <div style={{ marginLeft: 'auto', fontSize: 12, color: '#64748b', alignSelf: 'center' }}>
-                Найдено: {scanResults.length}
-              </div>
-            </div>
-
-            {scanError && (
-              <div style={{ marginTop: 10, color: '#dc2626', fontSize: 12, flexShrink: 0 }}>
-                {scanError}
-              </div>
-            )}
-
-            <div style={{ marginTop: 12, borderTop: '1px solid #e5e7eb', paddingTop: 12, overflow: 'auto' }}>
-              {scanResults.length === 0 ? (
-                <div style={{ fontSize: 13, color: '#64748b' }}>
-                  {scanning ? 'Ищем устройства…' : 'Пока ничего не найдено. Проверьте подсеть и что страница МК доступна по HTTP на 80 порту.'}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {scanResults.map((r) => (
-                    <button
-                      key={r.host}
-                      type="button"
-                      onClick={() => connectToFoundDevice(r.host, r.apiPort)}
-                      style={{
-                        padding: '10px 12px',
-                        textAlign: 'left',
-                        border: '1px solid #d1d5db',
-                        borderRadius: 6,
-                        background: '#f8fafc',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        gap: 12,
-                      }}
-                      title="Подключиться"
-                    >
-                      <span style={{ fontWeight: 700 }}>
-                        {r.host}
-                        <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 10 }}>
-                          info :{r.infoPort}
-                          {r.apiPort ? ` · api :${r.apiPort}` : ''}
-                        </span>
-                      </span>
-                      <span style={{ fontSize: 12, color: '#64748b' }}>{r.title ?? ''}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
