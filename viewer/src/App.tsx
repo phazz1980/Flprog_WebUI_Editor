@@ -484,7 +484,7 @@ function App() {
   const [sliderRevertOverrides, setSliderRevertOverrides] = useState<Record<string, string>>({});
   const pendingSliderRef = useRef<{ id: string; value: string; previousValue: string; varNameOut: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
   const sliderDragStartRef = useRef<{ previousValue: string } | null>(null);
-  const SLIDER_RESPONSE_WAIT_MS = 1000;
+  const SLIDER_RESPONSE_WAIT_MS = 2000;
 
   const [switchDisplayOverrides, setSwitchDisplayOverrides] = useState<Record<string, string>>({});
   const [switchRevertOverrides, setSwitchRevertOverrides] = useState<Record<string, string>>({});
@@ -962,7 +962,8 @@ function App() {
           logicalY < w.y + w.height
       );
       if (hitSlider && connected) {
-        const sliderStateIdx = hitSlider.responseStateIndex ?? hitSlider.stateIndex;
+        // Для slider отображаемое/подтверждаемое значение берём из *_out (out-слот).
+        const sliderStateIdx = hitSlider.stateIndex;
         const previousValue = displayValue(hitSlider, getStateValueByIndex(state, sliderStateIdx), hitSlider.text ?? '');
         sliderDragStartRef.current = { previousValue };
         setDraggingSliderId(hitSlider.id);
@@ -1024,7 +1025,7 @@ function App() {
         const prevVal = pendingSliderRef.current.previousValue;
         const nameOut = pendingSliderRef.current.varNameOut;
         pendingSliderRef.current = null;
-        setVar(nameOut, prevVal);
+        // UI fallback: не отправляем обратно на МК, иначе можно получить обратный "дерг".
         setSliderRevertOverrides((prev) => ({ ...prev, [id]: prevVal }));
         setLocalSliderValues((prev) => {
           const next = { ...prev };
@@ -1041,8 +1042,9 @@ function App() {
     const { id, value } = pendingSliderRef.current;
     const w = widgets.find((x) => x.id === id);
     if (!w || w.stateIndex < 0) return;
-    const responseIdx = w.responseStateIndex ?? w.stateIndex;
-    const raw = getStateValueByIndex(state, responseIdx);
+    // Для slider подтверждение берём из *_out (out-слот), иначе UI может откатиться
+    // когда устройство реально меняет другой слот.
+    const raw = getStateValueByIndex(state, w.stateIndex);
     const currentStr = raw === undefined ? '' : String(typeof raw === 'number' ? Math.round(raw) : raw);
     if (currentStr === value) {
       clearTimeout(pendingSliderRef.current.timeoutId);
@@ -1438,11 +1440,11 @@ function App() {
                 <Layer listening={true}>
                   <Group scaleX={scale} scaleY={scale} listening={true}>
                     {visibleWidgets.map((w) => {
-                      // Для switch в реальном устройстве часто логика "дергается" по *_out,
-                      // поэтому отображение берём из первой (out) переменной.
+                      // Для bidi-виджетов отображение/подтверждение берём из *_out (out-слот),
+                      // чтобы UI не "отбрасывало назад", когда устройство обновляет другой слот.
                       const stateIdx =
                         w.stateIndex >= 0
-                          ? w.type === 'switch'
+                          ? (w.type === 'switch' || w.type === 'slider' || w.type === 'input')
                             ? w.stateIndex
                             : (w.responseStateIndex ?? w.stateIndex)
                           : -1;

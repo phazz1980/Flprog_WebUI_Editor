@@ -53,7 +53,12 @@ export function parseConfig(raw: unknown): ViewerConfig | null {
     const tabId = tabIds[tabIndex] ?? tabIds[0];
     const varName = row[9] != null ? String(row[9]) : id;
 
-    const hasVariable = type !== 'rect';
+    // В /config labels могут присутствовать как "просто надпись" (varType=none в редакторе).
+    // Генератор в этом случае не добавляет varName в compactWidgets, а сервер не включает такие виджеты
+    // в widgetsWithVars при формировании /state.
+    // Поэтому labels без varName нельзя считать имеющими переменную.
+    const hasVariable =
+      type !== 'rect' && !(type === 'label' && (row[9] == null || String(row[9] ?? '').trim() === ''));
     const stateIdx = hasVariable ? stateIndex : -1;
     const isBidi = type === 'slider' || type === 'switch' || type === 'input';
     if (hasVariable) stateIndex += isBidi ? 2 : 1;
