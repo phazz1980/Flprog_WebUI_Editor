@@ -47,11 +47,12 @@
 
 ```json
 "parameters": [
-  { "name": "port", "type": "int", "default": "80", "parName": "par" }
+  { "name": "port", "type": "int", "default": "8080", "parName": "par" },
+  { "name": "info_port", "type": "int", "default": "80", "parName": "par2" }
 ]
 ```
 
-В сгенерированном коде это может соответствовать: `int port=80; //par`.
+В сгенерированном коде это может соответствовать: `int port=8080; //par`, `int info_port=80; //par2`.
 
 ---
 
@@ -116,7 +117,8 @@
 | globals      | Глобальные переменные (объявления). |
 | setup        | Функция `setup()`. |
 | loop         | Функция `loop()`. |
-| handleRoot   | Обработчик главной страницы. |
+| handleApiRootHint | Корень порта API (короткий текст; полная справка на `info_port`). |
+| handleRoot   | HTML-справка на порту `info_port` (80 по умолчанию). |
 | handleConfig | Обработчик `/config`. |
 | handleSetVar | Обработчик `/set`. |
 | handleState  | Обработчик `/state`. |
@@ -224,7 +226,8 @@
     "description": "Одна кнопка и один LED"
   },
   "parameters": [
-    { "name": "port", "type": "int", "default": "80", "parName": "par" }
+    { "name": "port", "type": "int", "default": "8080", "parName": "par" },
+    { "name": "info_port", "type": "int", "default": "80", "parName": "par2" }
   ],
   "inputs": [
     { "varName": "led1", "type": "bool", "inName": "in" }
