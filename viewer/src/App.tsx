@@ -450,6 +450,23 @@ function App() {
     }
   }, [isMobile]);
 
+  // Проверка обновления на GitHub Pages: при расхождении даты сборки — жёсткая перезагрузка
+  useEffect(() => {
+    const clientBuildDate = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
+    if (!clientBuildDate) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const base = typeof process !== 'undefined' ? process.env?.PUBLIC_URL || '' : '';
+    const url = `${base}/build-info.json?t=${Date.now()}`;
+    fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { buildDate?: string } | null) => {
+        if (data?.buildDate && data.buildDate !== clientBuildDate) {
+          window.location.reload();
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const urlParamsRef = useRef(getUrlParams());
   const saved = loadSavedAddress();
   const [ip, setIp] = useState(() => urlParamsRef.current.host ?? saved.ip);
