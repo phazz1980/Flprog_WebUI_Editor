@@ -205,6 +205,13 @@ function parseMcuFromPing(text: string): string | undefined {
   return undefined;
 }
 
+/** Из ответа /ping извлекаем название устройства (строка после "NAME: "). */
+function parseDeviceNameFromPing(text: string): string | undefined {
+  const m = /NAME:\s*(.+?)(?:\r?\n|$)/i.exec(text);
+  const name = m?.[1]?.trim();
+  return name || undefined;
+}
+
 /** Читает из URL параметры ?host=...&port=...&connect=1 для встраивания в редактор. */
 function getUrlParams(): { host?: string; port?: string; connect: boolean } {
   if (typeof window === 'undefined' || !window.location.search) return { connect: false };
@@ -775,9 +782,10 @@ function App() {
             const pingText = await fetchTextWithTimeout(`http://${host}:${DEVICE_INFO_PORT}/ping`, TIMEOUT_MS);
             if (!isPingResponse(pingText)) continue;
 
-            // Пинг есть — устройство "похоже на Flprog". Из ответа извлекаем тип МК для отличия в списке.
+            // Пинг есть — устройство "похоже на Flprog". Из ответа извлекаем тип МК и название устройства.
             const mcu = parseMcuFromPing(pingText);
-            found.push({ host, infoPort: DEVICE_INFO_PORT, mcu });
+            const title = parseDeviceNameFromPing(pingText);
+            found.push({ host, infoPort: DEVICE_INFO_PORT, mcu, title });
             setScanResults([...found].sort((a, b) => a.host.localeCompare(b.host, 'en')));
           } catch {
             // ignore
@@ -1875,28 +1883,15 @@ function App() {
                     >
                       <span style={{ fontWeight: 700 }}>
                         {r.host}
-                        <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 10 }}>
-                          info :{r.infoPort}
-                          {r.apiPort ? ` · api :${r.apiPort}` : ''}
-                        </span>
-                        {r.mcu ? (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              fontSize: 11,
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              background: '#e0e7ff',
-                              color: '#3730a3',
-                              fontWeight: 600,
-                            }}
-                            title="Тип МК"
-                          >
-                            {r.mcu}
+                        {(r.mcu || r.title) ? (
+                          <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                            {(r.mcu || r.title) ? `${r.mcu ?? ''}${r.mcu && r.title ? ' ' : ''}${r.title ?? ''}` : ''}
                           </span>
                         ) : null}
                       </span>
-                      <span style={{ fontSize: 12, color: '#64748b' }}>{r.title ?? ''}</span>
+                      {r.apiPort ? (
+                        <span style={{ fontSize: 12, color: '#64748b' }}>{`api :${r.apiPort}`}</span>
+                      ) : null}
                     </button>
                   ))}
                 </div>

@@ -338,6 +338,22 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
   const [simulatorError, setSimulatorError] = useState<string | null>(null);
   const [simulatorSuccess, setSimulatorSuccess] = useState(false);
   const [simulatorOnline, setSimulatorOnline] = useState(false);
+  /** Название блока и устройства: используется в имени .ino/.ubi и в ответе /ping на МК. Пустое = Flprog_WebUI. Сохраняется в localStorage. */
+  const [blockDeviceName, setBlockDeviceName] = useState(() => {
+    try {
+      return localStorage.getItem('flprog_editor_blockDeviceName') ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const setBlockDeviceNameAndSave = useCallback((value: string) => {
+    setBlockDeviceName(value);
+    try {
+      localStorage.setItem('flprog_editor_blockDeviceName', value);
+    } catch {
+      // ignore
+    }
+  }, []);
   const [demoMode, setDemoMode] = useState(false);
   const [demoValues, setDemoValues] = useState<Record<string, string>>({});
   const [demoEditingInputId, setDemoEditingInputId] = useState<string | null>(null);
@@ -502,8 +518,8 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
 
   const handleGenerateCode = () => {
     const stamp = getCreationStamp();
-    const baseName = `Flprog_WebUI_${stamp}`;
-    const code = generateArduinoCode(widgets, canvasConfig, tabs);
+    const baseName = `${(blockDeviceName.trim() || 'Flprog_WebUI')}_${stamp}`;
+    const code = generateArduinoCode(widgets, canvasConfig, tabs, blockDeviceName.trim() || undefined);
     // UTF-8 с BOM — чтобы кириллица не превращалась в крокозябры при открытии в Windows
     const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const encoded = new TextEncoder().encode(code);
@@ -646,8 +662,9 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
 
     try {
       const stamp = getCreationStamp();
-      const blockName = `Flprog_WebUI_${stamp}`;
-      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs);
+      const baseName = blockDeviceName.trim() || 'Flprog_WebUI';
+      const blockName = `${baseName}_${stamp}`;
+      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs, blockDeviceName.trim() || undefined);
       const parsed = parserApi.parseArduinoCode(inoCode);
       const setupCode = parserApi.extractFunctionBody(inoCode, 'setup');
       const loopCode = parserApi.extractFunctionBody(inoCode, 'loop');
@@ -1416,18 +1433,31 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <h3>Предпросмотр кода</h3>
               <button onClick={() => setShowCode(false)}>Закрыть</button>
             </div>
-            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs)} style={{ flex: 1, fontFamily: 'monospace' }} />
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+                Название блока и устройства (пусто — Flprog_WebUI):
+              </label>
+              <input
+                type="text"
+                value={blockDeviceName}
+                onChange={(e) => setBlockDeviceNameAndSave(e.target.value)}
+                placeholder="Flprog_WebUI"
+                style={{ width: '100%', maxWidth: 320, padding: '6px 8px', boxSizing: 'border-box' }}
+              />
+            </div>
+            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs, blockDeviceName.trim() || undefined)} style={{ flex: 1, fontFamily: 'monospace' }} />
             <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Скачать .ino</button>
               <button
                 onClick={() => {
                   const stamp = getCreationStamp();
-                  const json = buildImportJson(widgets, canvasConfig, tabs, { activeTabId, projectName: `WebUI_${stamp}` });
+                  const baseName = blockDeviceName.trim() || 'Flprog_WebUI';
+                  const json = buildImportJson(widgets, canvasConfig, tabs, { activeTabId, projectName: `${baseName}_${stamp}` });
                   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json;charset=utf-8' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `Flprog_WebUI_${stamp}.json`;
+                  a.download = `${baseName}_${stamp}.json`;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
@@ -1438,7 +1468,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
                 onClick={() => {
-                  const code = generateArduinoCode(widgets, canvasConfig, tabs);
+                  const code = generateArduinoCode(widgets, canvasConfig, tabs, blockDeviceName.trim() || undefined);
                   if (navigator.clipboard?.writeText) {
                     navigator.clipboard.writeText(code).then(() => {
                       setCopyToastVisible(true);

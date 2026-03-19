@@ -50,7 +50,10 @@ function buildDeviceRootHtml(viewerUrl: string, apiPort: number, infoPort: numbe
 </body></html>`;
 }
 
-export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?: Tab[]) => {
+export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?: Tab[], deviceName?: string) => {
+  const deviceNameForPing = (deviceName != null && String(deviceName).trim()) ? String(deviceName).trim() : 'Flprog_WebUI';
+  const deviceNameDefineLiteral = '"' + escapeCppString(deviceNameForPing) + '"';
+
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
   // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
   const configWidgets = widgets.filter(
@@ -236,8 +239,9 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?:
   return `/* @once */
 #include "flprogWebServer.h"
 
-#define API_PORT ${DEFAULT_API_PORT}
-#define INFO_PORT ${DEFAULT_INFO_PORT}
+#define API_PORT ${DEFAULT_API_PORT}  // par
+#define INFO_PORT ${DEFAULT_INFO_PORT}  // par
+#define DEVICE_NAME ${deviceNameDefineLiteral}  // par
 FLProgWebServer WebServer(&FLPROG_WIFI_INTERFACE1, API_PORT);
 FLProgWebServer WebInfo(&FLPROG_WIFI_INTERFACE1, INFO_PORT);
 
@@ -350,8 +354,10 @@ void handlePing(FLProgWebServer *server) {
     "Content-Type: text/plain\\r\\n"
     "Connection: close\\r\\n"
     "\\r\\n"
-    "ESP32-WEBUI"
+    "Flprog_WebUI\\r\\nNAME: "
   );
+  server->print(DEVICE_NAME);
+  server->print("\\r\\n");
 }
 
 void handle404(FLProgWebServer *server) {
