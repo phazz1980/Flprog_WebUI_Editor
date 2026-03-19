@@ -1,6 +1,6 @@
 /**
  * Пишет build-info.json в build/ с датой сборки для проверки обновлений на клиенте.
- * Запускать после react-scripts build из директории viewer.
+ * Запускать после react-scripts build (из корня или из viewer).
  */
 const fs = require('fs');
 const path = require('path');

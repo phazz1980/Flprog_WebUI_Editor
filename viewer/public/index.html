@@ -12,6 +12,15 @@
     <title>Flprog WebUI Client</title>
     <script>
       (function() {
+        function reloadBypassCache() {
+          var search = location.search || '';
+          var hash = location.hash || '';
+          location.href = location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+        }
+        if (/\b_=\d+\b/.test(location.search)) {
+          var clean = location.search.replace(/\b_=\d+\b&?|&\b_=\d+\b/g, '').replace(/\?&/, '?').replace(/^\?$/, '');
+          if (history.replaceState) history.replaceState(null, '', location.pathname + (clean || '') + location.hash);
+        }
         var base = document.querySelector('base');
         var path = (base && base.getAttribute('href')) || (document.currentScript && document.currentScript.src ? document.currentScript.src.replace(/\/[^/]*$/, '') : '') || '';
         if (!path && typeof window !== 'undefined') path = window.location.pathname.replace(/\/[^/]*$/, '') || '/';
@@ -22,14 +31,36 @@
         fetch(path + '/build-info.json?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' })
           .then(function(r) { return r.ok ? r.json() : null; })
           .then(function(d) {
-            if (d && d.buildDate && d.buildDate !== current) window.location.reload();
+            if (d && d.buildDate && d.buildDate !== current) reloadBypassCache();
           })
           .catch(function() {});
+        if (typeof navigator !== 'undefined' && navigator.serviceWorker && path) {
+          navigator.serviceWorker.register(path + '/sw.js', { scope: path + '/' }).catch(function() {});
+        }
       })();
     </script>
   </head>
   <body>
     <noscript>Нужен JavaScript для работы приложения.</noscript>
     <div id="root"></div>
+    <script>
+      (function() {
+        setTimeout(function checkFailedLoad() {
+          var root = document.getElementById('root');
+          if (!root || root.children.length > 0) return;
+          var mainScript = document.querySelector('script[src*="static/js/main"]');
+          if (!mainScript || !mainScript.src) return;
+          fetch(mainScript.src, { cache: 'reload', credentials: 'same-origin' })
+            .then(function(r) {
+              if (r.status === 404) {
+                var search = location.search || '';
+                var hash = location.hash || '';
+                location.href = location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+              }
+            })
+            .catch(function() {});
+        }, 4000);
+      })();
+    </script>
   </body>
 </html>
