@@ -14,11 +14,31 @@ function isBidirectional(w) {
   return w.type === 'switch' || w.type === 'slider' || w.type === 'input';
 }
 
+function orderedTabIdsForConfig(usedTabIds, tabs) {
+  const out = [];
+  if (Array.isArray(tabs) && tabs.length > 0) {
+    for (const t of tabs) {
+      if (!t || !t.id) continue;
+      const id = t.id;
+      if (usedTabIds.has(id) && !out.includes(id)) out.push(id);
+    }
+  }
+  const rest = [...usedTabIds].filter((id) => !out.includes(id));
+  rest.sort((a, b) => {
+    const na = parseInt(String(a).replace(/^tab_/, ''), 10) || 0;
+    const nb = parseInt(String(b).replace(/^tab_/, ''), 10) || 0;
+    return na - nb;
+  });
+  out.push(...rest);
+  return out;
+}
+
 function buildConfig(widgets, tabs) {
   const configWidgets = widgets.filter(
     (w) => w.varType !== 'none' || w.type === 'label' || w.type === 'rect'
   );
-  const tabIds = [...new Set(configWidgets.map((w) => w.tabId || 'tab_1'))];
+  const usedTabIds = new Set(configWidgets.map((w) => w.tabId || 'tab_1'));
+  const tabIds = orderedTabIdsForConfig(usedTabIds, tabs);
 
   const tabMeta = tabIds.map((id, index) => {
     const fromTabs = Array.isArray(tabs) ? tabs.find((t) => t && t.id === id) : null;
@@ -55,6 +75,12 @@ function buildConfig(widgets, tabs) {
       if (w.varName !== w.id || w.type === 'label') {
         base.push(w.varName);
       }
+    }
+    const cap =
+      w.type !== 'rect' && typeof w.caption === 'string' && w.caption.trim() !== '' ? w.caption.trim() : '';
+    if (cap !== '') {
+      if (base.length === 9) base.push('');
+      base.push(cap);
     }
     return base;
   });

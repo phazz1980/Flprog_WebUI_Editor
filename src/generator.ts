@@ -87,6 +87,25 @@ function buildDeviceRootHtml(viewerUrl: string, apiPort: number, infoPort: numbe
 </body></html>`;
 }
 
+/** Порядок tabIndex в /config совпадает с порядком вкладок в редакторе, а не с порядком виджетов в массиве. */
+function orderedTabIdsForConfig(usedTabIds: Set<string>, tabs: Tab[] | undefined): string[] {
+  const out: string[] = [];
+  if (tabs && tabs.length > 0) {
+    for (const t of tabs) {
+      const id = t.id;
+      if (usedTabIds.has(id) && !out.includes(id)) out.push(id);
+    }
+  }
+  const rest = Array.from(usedTabIds).filter((id) => !out.includes(id));
+  rest.sort((a, b) => {
+    const na = parseInt(String(a).replace(/^tab_/, ''), 10) || 0;
+    const nb = parseInt(String(b).replace(/^tab_/, ''), 10) || 0;
+    return na - nb;
+  });
+  out.push(...rest);
+  return out;
+}
+
 export const generateArduinoCode = (
   widgets: Widget[],
   canvasConfig: any,
@@ -110,9 +129,8 @@ export const generateArduinoCode = (
     (w) => w.varType !== 'none' || w.type === 'label' || w.type === 'rect',
   );
 
-  const uniqueTabIds = Array.from(
-    new Set(configWidgets.map((w) => w.tabId ?? 'tab_1')),
-  );
+  const usedTabIds = new Set(configWidgets.map((w) => w.tabId ?? 'tab_1'));
+  const uniqueTabIds = orderedTabIdsForConfig(usedTabIds, tabs);
 
   const tabMeta = uniqueTabIds.map((id, index) => {
     const fromTabs = tabs?.find((t) => t.id === id);
@@ -162,6 +180,12 @@ export const generateArduinoCode = (
       if (w.varName !== w.id || w.type === 'label') {
         base.push(w.varName);
       }
+    }
+    const cap =
+      w.type !== 'rect' && typeof w.caption === 'string' && w.caption.trim() !== '' ? w.caption.trim() : '';
+    if (cap !== '') {
+      if (base.length === 9) base.push('');
+      base.push(cap);
     }
     return base;
   });

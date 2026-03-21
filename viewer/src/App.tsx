@@ -354,7 +354,20 @@ function ViewerWidget({
       onPointerUpOutside={isButton ? handleButtonUp : undefined}
       listening={true}
     >
-      {/* caption в компактном формате /config не передаётся — не рисуем */}
+      {widget.type !== 'rect' && (widget.caption ?? '') !== '' && (
+        <Text
+          text={widget.caption}
+          x={0}
+          y={-18}
+          width={lw}
+          height={18}
+          align="center"
+          verticalAlign="middle"
+          fill={textOnCaption}
+          fontSize={12}
+          listening={false}
+        />
+      )}
       {widget.type === 'led' ? (
         <Circle
           radius={lw / 2}

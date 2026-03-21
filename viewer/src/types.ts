@@ -10,6 +10,8 @@ export interface RuntimeWidget {
   height: number;
   color: string;
   text: string;
+  /** Подпись над виджетом (из compact: [10], после varName [9]) */
+  caption?: string;
   tabId: string;
   tabIndex: number;
   varName: string; // id или [9] из compactWidgets

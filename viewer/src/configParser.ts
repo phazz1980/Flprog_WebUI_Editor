@@ -5,7 +5,7 @@ const TYPE_BY_CODE: WidgetType[] = ['button', 'slider', 'input', 'led', 'label',
 /**
  * Парсит ответ GET /config: [ названияВкладок[], compactWidgets, [width, height, color] ].
  * Первый элемент — массив названий вкладок; третий — массив [ширина, высота, цвет].
- * compactWidgets: [id, typeCode, x, y, width, height, color, text, tabIndex, varName?]
+ * compactWidgets: [id, typeCode, x, y, width, height, color, text, tabIndex, varName?, caption?]
  */
 export function parseConfig(raw: unknown): ViewerConfig | null {
   if (!Array.isArray(raw) || raw.length < 2) return null;
@@ -52,6 +52,9 @@ export function parseConfig(raw: unknown): ViewerConfig | null {
     const tabIndex = Math.max(0, Math.min(Number(row[8]) || 0, tabIds.length - 1));
     const tabId = tabIds[tabIndex] ?? tabIds[0];
     const varName = row[9] != null ? String(row[9]) : id;
+    const captionRaw = row.length >= 11 ? row[10] : undefined;
+    const caption =
+      captionRaw != null && String(captionRaw).trim() !== '' ? String(captionRaw) : undefined;
 
     // В /config labels могут присутствовать как "просто надпись" (varType=none в редакторе).
     // Генератор в этом случае не добавляет varName в compactWidgets, а сервер не включает такие виджеты
@@ -72,6 +75,7 @@ export function parseConfig(raw: unknown): ViewerConfig | null {
       height,
       color,
       text,
+      ...(caption != null ? { caption } : {}),
       tabId,
       tabIndex,
       varName,
