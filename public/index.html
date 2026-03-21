@@ -3,10 +3,41 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Flprog WebUI Edit App" />
+    <meta name="build-date" content="__BUILD_DATE__" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>Flprog WebUI Edit</title>
+    <script>
+      (function() {
+        function reloadBypassCache() {
+          var search = location.search || '';
+          var hash = location.hash || '';
+          location.href = location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+        }
+        if (/\b_=\d+\b/.test(location.search)) {
+          var clean = location.search.replace(/\b_=\d+\b&?|&\b_=\d+\b/g, '').replace(/\?&/, '?').replace(/^\?$/, '');
+          if (history.replaceState) history.replaceState(null, '', location.pathname + (clean || '') + location.hash);
+        }
+        var path = location.pathname.replace(/\/[^/]*$/, '') || '/';
+        var meta = document.querySelector('meta[name="build-date"]');
+        var current = meta ? (meta.getAttribute('content') || '').trim() : '';
+        if (!current || current === '__BUILD_DATE__') return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        fetch(path + '/build-info.json?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' })
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(d) {
+            if (d && d.buildDate && d.buildDate !== current) reloadBypassCache();
+          })
+          .catch(function() {});
+        if (typeof navigator !== 'undefined' && navigator.serviceWorker && path) {
+          navigator.serviceWorker.register(path + '/sw.js', { scope: path + '/' }).catch(function() {});
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -14,5 +45,24 @@
     <script type="module" src="%PUBLIC_URL%/Parser/constants.js"></script>
     <script type="module" src="%PUBLIC_URL%/Parser/parser.js"></script>
     <script type="module" src="%PUBLIC_URL%/Parser/generator.js"></script>
+    <script>
+      (function() {
+        setTimeout(function() {
+          var root = document.getElementById('root');
+          if (!root || root.children.length > 0) return;
+          var mainScript = document.querySelector('script[src*="static/js/main"]');
+          if (!mainScript || !mainScript.src) return;
+          fetch(mainScript.src, { cache: 'reload', credentials: 'same-origin' })
+            .then(function(r) {
+              if (r.status === 404) {
+                var search = location.search || '';
+                var hash = location.hash || '';
+                location.href = location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+              }
+            })
+            .catch(function() {});
+        }, 4000);
+      })();
+    </script>
   </body>
 </html>

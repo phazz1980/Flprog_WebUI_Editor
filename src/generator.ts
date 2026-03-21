@@ -37,6 +37,8 @@ function escapeBlockCommentText(value: string): string {
 export interface GenerateArduinoCodeOptions {
   /** Метка `@name` в заголовке скетча (парсер UBI); по умолчанию — с датой/временем. */
   blockName?: string;
+  /** Имя в ответе /ping (NAME: …); по умолчанию Flprog_WebUI. */
+  deviceName?: string;
 }
 
 const DEFAULT_API_PORT = 8080;
@@ -97,6 +99,11 @@ export const generateArduinoCode = (
 */
 
 `;
+  const deviceNameForPing =
+    options?.deviceName != null && String(options.deviceName).trim()
+      ? String(options.deviceName).trim()
+      : 'Flprog_WebUI';
+  const deviceNameDefineLiteral = '"' + escapeCppString(deviceNameForPing) + '"';
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
   // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
   const configWidgets = widgets.filter(
@@ -286,6 +293,7 @@ export const generateArduinoCode = (
 
   return `${leadingBlockComment}#include "flprogWebServer.h"
 
+#define DEVICE_NAME ${deviceNameDefineLiteral}  // par
 int port = ${DEFAULT_API_PORT}; //par
 int info_port = ${DEFAULT_INFO_PORT}; //par
 FLProgWebServer WebServer(&FLPROG_WIFI_INTERFACE1, port);
@@ -400,8 +408,10 @@ void handlePing(FLProgWebServer *server) {
     "Content-Type: text/plain\\r\\n"
     "Connection: close\\r\\n"
     "\\r\\n"
-    "ESP32-WEBUI"
+    "Flprog_WebUI\\r\\nNAME: "
   );
+  server->print(DEVICE_NAME);
+  server->print("\\r\\n");
 }
 
 void handle404(FLProgWebServer *server) {

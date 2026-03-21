@@ -329,8 +329,14 @@ function App() {
   const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const [showCode, setShowCode] = useState(false);
-  /** Префикс имени блока (дата добавляется автоматически при открытии окна). */
-  const [codeModalNamePrefix, setCodeModalNamePrefix] = useState('Flprog_WebUI');
+  /** Префикс имени блока (дата добавляется автоматически при открытии окна). Сохраняется в localStorage. */
+  const [codeModalNamePrefix, setCodeModalNamePrefix] = useState(() => {
+    try {
+      return localStorage.getItem('flprog_editor_blockDeviceName')?.trim() || 'Flprog_WebUI';
+    } catch {
+      return 'Flprog_WebUI';
+    }
+  });
   /** Метка YYMMDD_HHmm — задаётся при открытии окна кода, к префиксу не дописывается при редактировании. */
   const [codeModalStamp, setCodeModalStamp] = useState(() => formatCreationStamp());
   const [showHelp, setShowHelp] = useState(false);
@@ -499,14 +505,29 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
     [codeModalNamePrefix, codeModalStamp],
   );
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('flprog_editor_blockDeviceName', codeModalNamePrefix);
+    } catch {
+      // ignore
+    }
+  }, [codeModalNamePrefix]);
+
   const previewArduinoCode = useMemo(
-    () => generateArduinoCode(widgets, canvasConfig, tabs, { blockName: codeModalFullBlockName }),
-    [widgets, canvasConfig, tabs, codeModalFullBlockName],
+    () =>
+      generateArduinoCode(widgets, canvasConfig, tabs, {
+        blockName: codeModalFullBlockName,
+        deviceName: codeModalNamePrefix.trim() || undefined,
+      }),
+    [widgets, canvasConfig, tabs, codeModalFullBlockName, codeModalNamePrefix],
   );
 
   const handleGenerateCode = () => {
     const baseName = codeModalFullBlockName;
-    const code = generateArduinoCode(widgets, canvasConfig, tabs, { blockName: baseName });
+    const code = generateArduinoCode(widgets, canvasConfig, tabs, {
+      blockName: baseName,
+      deviceName: codeModalNamePrefix.trim() || undefined,
+    });
     // UTF-8 с BOM — чтобы кириллица не превращалась в крокозябры при открытии в Windows
     const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const encoded = new TextEncoder().encode(code);
@@ -649,7 +670,10 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
 
     try {
       const blockName = codeModalFullBlockName;
-      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs, { blockName });
+      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs, {
+        blockName,
+        deviceName: codeModalNamePrefix.trim() || undefined,
+      });
       const parsed = parserApi.parseArduinoCode(inoCode);
       const setupCode = parserApi.extractFunctionBody(inoCode, 'setup');
       const loopCode = parserApi.extractFunctionBody(inoCode, 'loop');
@@ -834,7 +858,6 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
         <button
           onClick={() => {
             setCodeModalStamp(formatCreationStamp());
-            setCodeModalNamePrefix('Flprog_WebUI');
             setShowCode(true);
           }}
           style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}
@@ -1428,7 +1451,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <button onClick={() => setShowCode(false)}>Закрыть</button>
             </div>
             <label htmlFor="code-modal-block-name" style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '6px', flexShrink: 0 }}>
-              Имя блока без даты — к имени автоматически добавляется дата (<code style={{ fontSize: '12px' }}>@name</code>, файлы)
+              Имя блока без даты — к имени автоматически добавляется дата (<code style={{ fontSize: '12px' }}>@name</code>, файлы); то же имя — в ответе /ping на МК.
             </label>
             <input
               id="code-modal-block-name"

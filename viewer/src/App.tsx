@@ -46,7 +46,7 @@ const DEFAULT_EMULATOR_PORT = '31337';
 /** Порт info-страницы на МК (ссылки/справка). По нему делаем "поиск МК". */
 const DEVICE_INFO_PORT = 80;
 
-type ScanResult = { host: string; infoPort: number; apiPort?: number; title?: string };
+type ScanResult = { host: string; infoPort: number; apiPort?: number; title?: string; mcu?: string };
 
 const SCAN_CONCURRENCY_DEFAULT = 16;
 const SCAN_CONCURRENCY_MIN = 1;
@@ -193,6 +193,23 @@ function parseDeviceInfoHtml(html: string): { apiPort?: number; title?: string }
 function isPingResponse(text: string): boolean {
   // Генератор прошивки (src/generator.ts) отдаёт "ESP32-WEBUI" в /ping.
   return /ESP32-WEBUI/i.test(text) || /FLPROG/i.test(text);
+}
+
+/** Из ответа /ping извлекаем тип МК для отображения в списке поиска. */
+function parseMcuFromPing(text: string): string | undefined {
+  const mcuExplicit = /MCU:\s*(\S+)/i.exec(text)?.[1];
+  if (mcuExplicit) return mcuExplicit.trim();
+  if (/ESP32-WEBUI/i.test(text) || /ESP32/i.test(text)) return 'ESP32';
+  if (/ESP8266/i.test(text)) return 'ESP8266';
+  if (/FLPROG/i.test(text)) return 'Flprog';
+  return undefined;
+}
+
+/** Из ответа /ping извлекаем название устройства (строка после "NAME: "). */
+function parseDeviceNameFromPing(text: string): string | undefined {
+  const m = /NAME:\s*(.+?)(?:\r?\n|$)/i.exec(text);
+  const name = m?.[1]?.trim();
+  return name || undefined;
 }
 
 /** Читает из URL параметры ?host=...&port=...&connect=1 для встраивания в редактор. */
@@ -449,6 +466,25 @@ function App() {
       setShowLeftPanel(!isMobile);
     }
   }, [isMobile]);
+
+  // Проверка обновления на GitHub Pages: при расхождении даты сборки — жёсткая перезагрузка
+  useEffect(() => {
+    const clientBuildDate = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
+    if (!clientBuildDate) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const base = typeof process !== 'undefined' ? process.env?.PUBLIC_URL || '' : '';
+    const url = `${base}/build-info.json?t=${Date.now()}`;
+    fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { buildDate?: string } | null) => {
+        if (data?.buildDate && data.buildDate !== clientBuildDate) {
+          const search = window.location.search || '';
+          const hash = window.location.hash || '';
+          window.location.href = window.location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const urlParamsRef = useRef(getUrlParams());
   const saved = loadSavedAddress();
@@ -746,9 +782,10 @@ function App() {
             const pingText = await fetchTextWithTimeout(`http://${host}:${DEVICE_INFO_PORT}/ping`, TIMEOUT_MS);
             if (!isPingResponse(pingText)) continue;
 
-            // Пинг есть — устройство "похоже на Flprog". Дополнительное чтение "/" часто упирается в CORS
-            // (роутеры/камеры/чужие веб-морды), поэтому не трогаем "/" и не засоряем консоль ошибками.
-            found.push({ host, infoPort: DEVICE_INFO_PORT });
+            // Пинг есть — устройство "похоже на Flprog". Из ответа извлекаем тип МК и название устройства.
+            const mcu = parseMcuFromPing(pingText);
+            const title = parseDeviceNameFromPing(pingText);
+            found.push({ host, infoPort: DEVICE_INFO_PORT, mcu, title });
             setScanResults([...found].sort((a, b) => a.host.localeCompare(b.host, 'en')));
           } catch {
             // ignore
@@ -1846,12 +1883,15 @@ function App() {
                     >
                       <span style={{ fontWeight: 700 }}>
                         {r.host}
-                        <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 10 }}>
-                          info :{r.infoPort}
-                          {r.apiPort ? ` · api :${r.apiPort}` : ''}
-                        </span>
+                        {(r.mcu || r.title) ? (
+                          <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                            {(r.mcu || r.title) ? `${r.mcu ?? ''}${r.mcu && r.title ? ' ' : ''}${r.title ?? ''}` : ''}
+                          </span>
+                        ) : null}
                       </span>
-                      <span style={{ fontSize: 12, color: '#64748b' }}>{r.title ?? ''}</span>
+                      {r.apiPort ? (
+                        <span style={{ fontSize: 12, color: '#64748b' }}>{`api :${r.apiPort}`}</span>
+                      ) : null}
                     </button>
                   ))}
                 </div>

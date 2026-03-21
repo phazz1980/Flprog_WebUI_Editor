@@ -17,7 +17,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "node ../scripts/set-build-date.js && react-scripts build"
+    "build": "node ../scripts/set-build-date.js && react-scripts build && node ../scripts/write-build-info.js"
   },
   "browserslist": {
     "production": [
