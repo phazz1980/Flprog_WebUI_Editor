@@ -16,7 +16,7 @@ function isBidirectional(w) {
 
 function buildConfig(widgets, tabs) {
   const configWidgets = widgets.filter(
-    (w) => w.varType !== 'none' || w.type === 'label'
+    (w) => w.varType !== 'none' || w.type === 'label' || w.type === 'rect'
   );
   const tabIds = [...new Set(configWidgets.map((w) => w.tabId || 'tab_1'))];
 

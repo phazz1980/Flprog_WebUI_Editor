@@ -105,9 +105,9 @@ export const generateArduinoCode = (
       : 'Flprog_WebUI';
   const deviceNameDefineLiteral = '"' + escapeCppString(deviceNameForPing) + '"';
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
-  // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
+  // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись) + rect (декор, varType none)
   const configWidgets = widgets.filter(
-    (w) => w.varType !== 'none' || w.type === 'label',
+    (w) => w.varType !== 'none' || w.type === 'label' || w.type === 'rect',
   );
 
   const uniqueTabIds = Array.from(
