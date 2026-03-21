@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/Flprog_WebUI_Editor/viewer/static/css/main.759f3a29.css",
-    "main.js": "/Flprog_WebUI_Editor/viewer/static/js/main.36eb3cf5.js",
+    "main.js": "/Flprog_WebUI_Editor/viewer/static/js/main.ec2a025f.js",
     "index.html": "/Flprog_WebUI_Editor/viewer/index.html",
     "main.759f3a29.css.map": "/Flprog_WebUI_Editor/viewer/static/css/main.759f3a29.css.map",
-    "main.36eb3cf5.js.map": "/Flprog_WebUI_Editor/viewer/static/js/main.36eb3cf5.js.map"
+    "main.ec2a025f.js.map": "/Flprog_WebUI_Editor/viewer/static/js/main.ec2a025f.js.map"
   },
   "entrypoints": [
     "static/css/main.759f3a29.css",
-    "static/js/main.36eb3cf5.js"
+    "static/js/main.ec2a025f.js"
   ]
 }
