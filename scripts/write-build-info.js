@@ -25,7 +25,8 @@ if (!fs.existsSync(buildDir)) {
   process.exit(1);
 }
 
-const info = { buildDate, buildTime };
+const buildSignature = `${buildDate}|${buildTime || ''}`;
+const info = { buildDate, buildTime, buildSignature };
 fs.writeFileSync(outPath, JSON.stringify(info), 'utf8');
 console.log('Wrote build-info.json with buildDate=' + buildDate + ' buildTime=' + buildTime);
 
@@ -33,9 +34,10 @@ console.log('Wrote build-info.json with buildDate=' + buildDate + ' buildTime=' 
 const indexPath = path.join(buildDir, 'index.html');
 if (fs.existsSync(indexPath)) {
   let html = fs.readFileSync(indexPath, 'utf8');
-  if (html.includes('__BUILD_DATE__')) {
+  if (html.includes('__BUILD_DATE__') || html.includes('__BUILD_SIGNATURE__')) {
     html = html.replace(/__BUILD_DATE__/g, buildDate);
+    html = html.replace(/__BUILD_SIGNATURE__/g, buildSignature);
     fs.writeFileSync(indexPath, html, 'utf8');
-    console.log('Patched index.html build-date');
+    console.log('Patched index.html build-date / build-signature');
   }
 }

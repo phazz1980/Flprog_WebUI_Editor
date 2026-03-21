@@ -9,6 +9,7 @@
     <meta name="theme-color" content="#0f172a" />
     <meta name="description" content="Flprog WebUI Client — просмотр и управление интерфейсом с МК" />
     <meta name="build-date" content="__BUILD_DATE__" />
+    <meta name="build-signature" content="__BUILD_SIGNATURE__" />
     <title>Flprog WebUI Client</title>
     <script>
       (function() {
@@ -17,6 +18,34 @@
           var hash = location.hash || '';
           location.href = location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
         }
+        function showVersionUpdateBanner() {
+          if (document.getElementById('flprog-version-update-banner')) return;
+          function mount() {
+            if (document.getElementById('flprog-version-update-banner')) return;
+            var bar = document.createElement('div');
+            bar.id = 'flprog-version-update-banner';
+            bar.setAttribute('role', 'status');
+            bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:12px 16px;font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;background:#0f172a;color:#e2e8f0;box-shadow:0 -4px 24px rgba(0,0,0,.4);';
+            var msg = document.createElement('span');
+            msg.textContent = 'На GitHub Pages опубликована новая версия.';
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'Обновить';
+            btn.style.cssText = 'cursor:pointer;border:none;border-radius:8px;padding:8px 16px;font:inherit;font-weight:600;background:#38bdf8;color:#0f172a;';
+            btn.onclick = function() { reloadBypassCache(); };
+            var dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.textContent = 'Позже';
+            dismiss.style.cssText = 'cursor:pointer;border:1px solid #64748b;border-radius:8px;padding:8px 16px;font:inherit;background:transparent;color:#e2e8f0;';
+            dismiss.onclick = function() { bar.remove(); };
+            bar.appendChild(msg);
+            bar.appendChild(btn);
+            bar.appendChild(dismiss);
+            (document.body || document.documentElement).appendChild(bar);
+          }
+          if (document.body) mount();
+          else document.addEventListener('DOMContentLoaded', mount);
+        }
         if (/\b_=\d+\b/.test(location.search)) {
           var clean = location.search.replace(/\b_=\d+\b&?|&\b_=\d+\b/g, '').replace(/\?&/, '?').replace(/^\?$/, '');
           if (history.replaceState) history.replaceState(null, '', location.pathname + (clean || '') + location.hash);
@@ -24,14 +53,16 @@
         var base = document.querySelector('base');
         var path = (base && base.getAttribute('href')) || (document.currentScript && document.currentScript.src ? document.currentScript.src.replace(/\/[^/]*$/, '') : '') || '';
         if (!path && typeof window !== 'undefined') path = window.location.pathname.replace(/\/[^/]*$/, '') || '/';
-        var meta = document.querySelector('meta[name="build-date"]');
-        var current = meta ? (meta.getAttribute('content') || '').trim() : '';
-        if (!current || current === '__BUILD_DATE__') return;
+        var sigMeta = document.querySelector('meta[name="build-signature"]');
+        var currentSig = sigMeta ? (sigMeta.getAttribute('content') || '').trim() : '';
+        if (!currentSig || currentSig === '__BUILD_SIGNATURE__') return;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
         fetch(path + '/build-info.json?t=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' })
           .then(function(r) { return r.ok ? r.json() : null; })
           .then(function(d) {
-            if (d && d.buildDate && d.buildDate !== current) reloadBypassCache();
+            if (!d || !d.buildDate) return;
+            var remoteSig = d.buildSignature || (d.buildDate + '|' + (d.buildTime || ''));
+            if (remoteSig !== currentSig) showVersionUpdateBanner();
           })
           .catch(function() {});
         if (typeof navigator !== 'undefined' && navigator.serviceWorker && path) {
