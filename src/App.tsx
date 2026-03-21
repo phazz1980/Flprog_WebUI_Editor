@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
-import { generateArduinoCode, buildImportJson } from './generator';
+import { generateArduinoCode, buildImportJson, buildBlockNameWithStamp, formatCreationStamp } from './generator';
 import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
@@ -329,6 +329,10 @@ function App() {
   const setZoom = (v: number) => setCanvasZoom((prev) => Math.max(zoomMin, Math.min(zoomMax, v)));
 
   const [showCode, setShowCode] = useState(false);
+  /** Префикс имени блока (дата добавляется автоматически при открытии окна). */
+  const [codeModalNamePrefix, setCodeModalNamePrefix] = useState('Flprog_WebUI');
+  /** Метка YYMMDD_HHmm — задаётся при открытии окна кода, к префиксу не дописывается при редактировании. */
+  const [codeModalStamp, setCodeModalStamp] = useState(() => formatCreationStamp());
   const [showHelp, setShowHelp] = useState(false);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
   const SIMULATOR_URL = 'http://localhost:31337';
@@ -490,20 +494,19 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
     }
   };
 
-  const getCreationStamp = () => {
-    const now = new Date();
-    const yy = String(now.getFullYear()).slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mi = String(now.getMinutes()).padStart(2, '0');
-    return `${yy}${mm}${dd}_${hh}${mi}`;
-  };
+  const codeModalFullBlockName = useMemo(
+    () => buildBlockNameWithStamp(codeModalNamePrefix, codeModalStamp),
+    [codeModalNamePrefix, codeModalStamp],
+  );
+
+  const previewArduinoCode = useMemo(
+    () => generateArduinoCode(widgets, canvasConfig, tabs, { blockName: codeModalFullBlockName }),
+    [widgets, canvasConfig, tabs, codeModalFullBlockName],
+  );
 
   const handleGenerateCode = () => {
-    const stamp = getCreationStamp();
-    const baseName = `Flprog_WebUI_${stamp}`;
-    const code = generateArduinoCode(widgets, canvasConfig, tabs);
+    const baseName = codeModalFullBlockName;
+    const code = generateArduinoCode(widgets, canvasConfig, tabs, { blockName: baseName });
     // UTF-8 с BOM — чтобы кириллица не превращалась в крокозябры при открытии в Windows
     const utf8Bom = new Uint8Array([0xef, 0xbb, 0xbf]);
     const encoded = new TextEncoder().encode(code);
@@ -645,9 +648,8 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
     }
 
     try {
-      const stamp = getCreationStamp();
-      const blockName = `Flprog_WebUI_${stamp}`;
-      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs);
+      const blockName = codeModalFullBlockName;
+      const inoCode = generateArduinoCode(widgets, canvasConfig, tabs, { blockName });
       const parsed = parserApi.parseArduinoCode(inoCode);
       const setupCode = parserApi.extractFunctionBody(inoCode, 'setup');
       const loopCode = parserApi.extractFunctionBody(inoCode, 'loop');
@@ -829,7 +831,16 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
           onBlur={commitCanvasColor}
           style={{ width: '100%' }}
         />
-        <button onClick={() => setShowCode(true)} style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}>Сгенерировать код</button>
+        <button
+          onClick={() => {
+            setCodeModalStamp(formatCreationStamp());
+            setCodeModalNamePrefix('Flprog_WebUI');
+            setShowCode(true);
+          }}
+          style={{ width: '100%', marginTop: '20px', padding: '12px', minHeight: 44, cursor: 'pointer', backgroundColor: '#000', color: 'white', border: '1px solid transparent', borderRadius: '4px', fontWeight: 'bold', boxSizing: 'border-box' }}
+        >
+          Сгенерировать код
+        </button>
         <a
           href={VIEWER_GITHUB_PAGES_URL}
           target="_blank"
@@ -1412,22 +1423,55 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
       {showCode && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: 'white', width: '80%', height: '80%', borderRadius: '8px', display: 'flex', flexDirection: 'column', padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <h3>Предпросмотр кода</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
+              <h3 style={{ margin: 0 }}>Предпросмотр кода</h3>
               <button onClick={() => setShowCode(false)}>Закрыть</button>
             </div>
-            <textarea readOnly value={generateArduinoCode(widgets, canvasConfig, tabs)} style={{ flex: 1, fontFamily: 'monospace' }} />
+            <label htmlFor="code-modal-block-name" style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '6px', flexShrink: 0 }}>
+              Имя блока без даты — к имени автоматически добавляется дата (<code style={{ fontSize: '12px' }}>@name</code>, файлы)
+            </label>
+            <input
+              id="code-modal-block-name"
+              type="text"
+              value={codeModalNamePrefix}
+              onChange={(e) => setCodeModalNamePrefix(e.target.value)}
+              onBlur={() => {
+                if (!codeModalNamePrefix.trim()) setCodeModalNamePrefix('Flprog_WebUI');
+              }}
+              spellCheck={false}
+              autoComplete="off"
+              style={{
+                width: '100%',
+                marginBottom: '6px',
+                padding: '8px 10px',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: '13px',
+                boxSizing: 'border-box',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                flexShrink: 0,
+              }}
+            />
+            <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#6b7280', flexShrink: 0, wordBreak: 'break-all' }}>
+              Итоговое имя: <strong style={{ fontWeight: 600, color: '#111827' }}>{codeModalFullBlockName}</strong>
+            </p>
+            <textarea readOnly value={previewArduinoCode} style={{ flex: 1, fontFamily: 'monospace', minHeight: 120 }} />
             <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               <button onClick={handleGenerateCode} style={{ padding: '10px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px' }}>Скачать .ino</button>
               <button
                 onClick={() => {
-                  const stamp = getCreationStamp();
-                  const json = buildImportJson(widgets, canvasConfig, tabs, { activeTabId, projectName: `WebUI_${stamp}` });
+                  const stamp = formatCreationStamp();
+                  const blockName = codeModalFullBlockName;
+                  const json = buildImportJson(widgets, canvasConfig, tabs, {
+                    activeTabId,
+                    projectName: `WebUI_${stamp}`,
+                    blockName,
+                  });
                   const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json;charset=utf-8' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `Flprog_WebUI_${stamp}.json`;
+                  a.download = `${blockName}.json`;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
@@ -1438,7 +1482,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <button onClick={handleGenerateUbiBlock} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Получить блок (.ubi)</button>
               <button
                 onClick={() => {
-                  const code = generateArduinoCode(widgets, canvasConfig, tabs);
+                  const code = previewArduinoCode;
                   if (navigator.clipboard?.writeText) {
                     navigator.clipboard.writeText(code).then(() => {
                       setCopyToastVisible(true);

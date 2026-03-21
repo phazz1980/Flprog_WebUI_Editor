@@ -48,11 +48,11 @@
 ```json
 "parameters": [
   { "name": "port", "type": "int", "default": "8080", "parName": "par" },
-  { "name": "info_port", "type": "int", "default": "80", "parName": "par2" }
+  { "name": "info_port", "type": "int", "default": "80", "parName": "par" }
 ]
 ```
 
-В сгенерированном коде это может соответствовать: `int port=8080; //par`, `int info_port=80; //par2`.
+В сгенерированном коде это может соответствовать: `int port=8080; //par`, `int info_port=80; //par`.
 
 ---
 
@@ -227,7 +227,7 @@
   },
   "parameters": [
     { "name": "port", "type": "int", "default": "8080", "parName": "par" },
-    { "name": "info_port", "type": "int", "default": "80", "parName": "par2" }
+    { "name": "info_port", "type": "int", "default": "80", "parName": "par" }
   ],
   "inputs": [
     { "varName": "led1", "type": "bool", "inName": "in" }

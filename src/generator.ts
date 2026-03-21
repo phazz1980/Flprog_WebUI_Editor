@@ -4,6 +4,41 @@ import { Widget, Tab } from './types';
 /** URL вьювера (при деплое на GitHub Pages). */
 const VIEWER_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor/viewer';
 
+/** Метка времени для имён файлов и блока: YYMMDD_HHmm */
+export function formatCreationStamp(): string {
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+  return `${yy}${mm}${dd}_${hh}${mi}`;
+}
+
+/** Имя блока для Flprog: `Flprog_WebUI_<YYMMDD_HHmm>`. */
+export function buildFlprogWebUiBlockName(stamp?: string): string {
+  return `Flprog_WebUI_${stamp ?? formatCreationStamp()}`;
+}
+
+/**
+ * Полное имя блока: префикс от пользователя + `_` + метка времени.
+ * Пустой префикс — как раньше: `Flprog_WebUI_${stamp}`.
+ */
+export function buildBlockNameWithStamp(prefix: string, stamp: string): string {
+  const p = (prefix ?? '').trim();
+  if (!p) return `Flprog_WebUI_${stamp}`;
+  return `${p}_${stamp}`;
+}
+
+function escapeBlockCommentText(value: string): string {
+  return (value ?? '').replace(/\*\//g, '*\\/');
+}
+
+export interface GenerateArduinoCodeOptions {
+  /** Метка `@name` в заголовке скетча (парсер UBI); по умолчанию — с датой/временем. */
+  blockName?: string;
+}
+
 const DEFAULT_API_PORT = 8080;
 const DEFAULT_INFO_PORT = 80;
 
@@ -50,7 +85,18 @@ function buildDeviceRootHtml(viewerUrl: string, apiPort: number, infoPort: numbe
 </body></html>`;
 }
 
-export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?: Tab[]) => {
+export const generateArduinoCode = (
+  widgets: Widget[],
+  canvasConfig: any,
+  tabs?: Tab[],
+  options?: GenerateArduinoCodeOptions,
+) => {
+  const blockName = options?.blockName ?? buildFlprogWebUiBlockName();
+  const leadingBlockComment = `/* @once
+@name ${escapeBlockCommentText(blockName)}
+*/
+
+`;
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
   // В конфиг попадают все виджеты с переменными + Label без переменной (просто надпись)
   const configWidgets = widgets.filter(
@@ -238,13 +284,12 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?:
 
   const stateShortKeyCode = stateShortKeyParts.join('\n');
 
-  return `/* @once */
-#include "flprogWebServer.h"
+  return `${leadingBlockComment}#include "flprogWebServer.h"
 
-#define API_PORT ${DEFAULT_API_PORT}
-#define INFO_PORT ${DEFAULT_INFO_PORT}
-FLProgWebServer WebServer(&FLPROG_WIFI_INTERFACE1, API_PORT);
-FLProgWebServer WebInfo(&FLPROG_WIFI_INTERFACE1, INFO_PORT);
+int port = ${DEFAULT_API_PORT}; //par
+int info_port = ${DEFAULT_INFO_PORT}; //par
+FLProgWebServer WebServer(&FLPROG_WIFI_INTERFACE1, port);
+FLProgWebServer WebInfo(&FLPROG_WIFI_INTERFACE1, info_port);
 
 const char config_json[] =
 R"rawliteral(
@@ -378,8 +423,8 @@ void handle404(FLProgWebServer *server) {
 function splitCodeIntoSections(fullCode: string): { id: string; name: string; code: string }[] {
   const sections: { id: string; name: string; code: string }[] = [];
   const markers: { id: string; name: string; start: RegExp }[] = [
-    { id: 'includes', name: 'Подключения', start: /^\/\* @once \*\/\s*\n/s },
-    { id: 'globals', name: 'Глобальные переменные', start: /^#define API_PORT/m },
+    { id: 'includes', name: 'Подключения', start: /^\/\* @once[\s\S]*?\*\/\s*\n/s },
+    { id: 'globals', name: 'Глобальные переменные', start: /^int port\s*=/m },
     { id: 'setup', name: 'Инициализация', start: /^void setup\(\)/m },
     { id: 'loop', name: 'Цикл', start: /^void loop\(\)/m },
     { id: 'handleApiRootHint', name: 'Корень порта API (текст)', start: /^void handleApiRootHint\(/m },
@@ -407,18 +452,24 @@ function splitCodeIntoSections(fullCode: string): { id: string; name: string; co
   return sections;
 }
 
-/** Собирает JSON для импорта в формате docs/IMPORT_JSON_FORMAT.md. */
+/**
+ * Собирает JSON для импорта в формате docs/IMPORT_JSON_FORMAT.md.
+ * @param options.blockName — имя блока для `@name` в первом комментарии скетча (по умолчанию с датой/временем).
+ */
 export function buildImportJson(
   widgets: Widget[],
   canvasConfig: { width?: number; height?: number; color?: string },
   tabs?: Tab[],
-  options?: { activeTabId?: string; projectName?: string }
+  options?: { activeTabId?: string; projectName?: string; blockName?: string }
 ): Record<string, unknown> {
   const widgetsWithVars = widgets.filter((w) => w.varType !== 'none');
   const isBidirectional = (w: Widget) =>
     w.type === 'switch' || w.type === 'slider' || w.type === 'input';
 
-  const parameters: { name: string; type: string; default: string; parName?: string }[] = [];
+  const parameters: { name: string; type: string; default: string; parName?: string }[] = [
+    { name: 'port', type: 'int', default: String(DEFAULT_API_PORT), parName: 'par' },
+    { name: 'info_port', type: 'int', default: String(DEFAULT_INFO_PORT), parName: 'par' },
+  ];
 
   const inputs: { varName: string; type: string; inName?: string }[] = [];
   const outputs: { varName: string; type: string; outName?: string }[] = [];
@@ -444,7 +495,9 @@ export function buildImportJson(
   }
   outputs.push({ varName: 'alarm_reset', type: 'bool', outName: 'alarm_reset' });
 
-  const fullCode = generateArduinoCode(widgets, canvasConfig, tabs);
+  const fullCode = generateArduinoCode(widgets, canvasConfig, tabs, {
+    blockName: options?.blockName ?? buildFlprogWebUiBlockName(),
+  });
   const sections = splitCodeIntoSections(fullCode);
 
   const meta = {
