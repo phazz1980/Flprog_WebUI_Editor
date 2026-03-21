@@ -11,10 +11,13 @@ const buildDir = path.join(cwd, 'build');
 const outPath = path.join(buildDir, 'build-info.json');
 
 let buildDate = new Date().toISOString().slice(0, 10);
+let buildTime = '';
 if (fs.existsSync(envPath)) {
   const content = fs.readFileSync(envPath, 'utf8');
   const m = content.match(/REACT_APP_BUILD_DATE=(.+)/);
   if (m) buildDate = m[1].trim();
+  const mt = content.match(/REACT_APP_BUILD_TIME=(.+)/);
+  if (mt) buildTime = mt[1].trim();
 }
 
 if (!fs.existsSync(buildDir)) {
@@ -22,9 +25,9 @@ if (!fs.existsSync(buildDir)) {
   process.exit(1);
 }
 
-const info = { buildDate };
+const info = { buildDate, buildTime };
 fs.writeFileSync(outPath, JSON.stringify(info), 'utf8');
-console.log('Wrote build-info.json with buildDate=' + buildDate);
+console.log('Wrote build-info.json with buildDate=' + buildDate + ' buildTime=' + buildTime);
 
 // Подставить дату сборки в index.html (для проверки версии инлайн-скриптом)
 const indexPath = path.join(buildDir, 'index.html');

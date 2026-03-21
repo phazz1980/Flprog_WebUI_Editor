@@ -7,7 +7,7 @@ import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
 import { Widget } from './types';
-import { BUILD_DATE, GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
+import { BUILD_DATE, BUILD_TIME, GRID_SIZE, PIXELS_PER_UNIT, snapToGrid } from './constants';
 
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
@@ -874,7 +874,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
           Открыть клиент
         </a>
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Flprog Web UI · Сборка: {BUILD_DATE}
+          Flprog Web UI · Сборка: {BUILD_DATE} {BUILD_TIME}
         </p>
       </div>
       )}

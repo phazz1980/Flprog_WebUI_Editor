@@ -15,6 +15,8 @@ import './App.css';
 const MOBILE_BREAKPOINT = 768;
 const SIDEBAR_WIDTH = 220;
 
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
 /** Дата сборки (REACT_APP_BUILD_DATE при сборке, иначе текущая дата в dev). */
 const BUILD_DATE = (() => {
   const s = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
@@ -23,6 +25,14 @@ const BUILD_DATE = (() => {
     return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
   }
   return new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+})();
+
+/** Время сборки (REACT_APP_BUILD_TIME при сборке, иначе текущее локальное время в dev). */
+const BUILD_TIME = (() => {
+  const s = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_TIME : undefined;
+  if (s && /^\d{2}:\d{2}:\d{2}$/.test(s.trim())) return s.trim();
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 })();
 const CANVAS_PANEL_GAP = 28;
 /** Отступ слева, когда левая панель скрыта, чтобы канва не заезжала на кнопку «☰». */
@@ -467,21 +477,30 @@ function App() {
     }
   }, [isMobile]);
 
-  // Проверка обновления на GitHub Pages: при расхождении даты сборки — жёсткая перезагрузка
+  // Проверка обновления на GitHub Pages: при расхождении даты/времени сборки — жёсткая перезагрузка
   useEffect(() => {
     const clientBuildDate = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
+    const clientBuildTime = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_TIME?.trim() : undefined;
     if (!clientBuildDate) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     const base = typeof process !== 'undefined' ? process.env?.PUBLIC_URL || '' : '';
     const url = `${base}/build-info.json?t=${Date.now()}`;
     fetch(url, { cache: 'no-store', credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { buildDate?: string } | null) => {
-        if (data?.buildDate && data.buildDate !== clientBuildDate) {
+      .then((data: { buildDate?: string; buildTime?: string } | null) => {
+        if (!data?.buildDate) return;
+        const doReload = () => {
           const search = window.location.search || '';
           const hash = window.location.hash || '';
           window.location.href = window.location.pathname + search + (search ? '&' : '?') + '_=' + Date.now() + hash;
+        };
+        if (data.buildDate !== clientBuildDate) {
+          doReload();
+          return;
         }
+        const serverTime = data.buildTime ?? '';
+        const clientTime = clientBuildTime ?? '';
+        if (serverTime && clientTime && serverTime !== clientTime) doReload();
       })
       .catch(() => {});
   }, []);
@@ -1354,7 +1373,7 @@ function App() {
           </p>
         )}
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Flprog Web UI Client · Сборка: {BUILD_DATE}
+          Flprog Web UI Client · Сборка: {BUILD_DATE} {BUILD_TIME}
         </p>
       </div>
 
