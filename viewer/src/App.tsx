@@ -19,7 +19,7 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** Дата сборки (REACT_APP_BUILD_DATE при сборке, иначе текущая дата в dev). */
 const BUILD_DATE = (() => {
-  const s = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
+  const s = process.env.REACT_APP_BUILD_DATE;
   if (s) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
     return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
@@ -27,10 +27,11 @@ const BUILD_DATE = (() => {
   return new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 })();
 
-/** Время сборки (REACT_APP_BUILD_TIME при сборке, иначе текущее локальное время в dev). */
+/** Время сборки (REACT_APP_BUILD_TIME при сборке; в dev без env — текущее время; в production без env — пусто). */
 const BUILD_TIME = (() => {
-  const s = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_TIME : undefined;
+  const s = process.env.REACT_APP_BUILD_TIME;
   if (s && /^\d{2}:\d{2}:\d{2}$/.test(s.trim())) return s.trim();
+  if (process.env.NODE_ENV === 'production') return '';
   const d = new Date();
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 })();
@@ -479,11 +480,11 @@ function App() {
 
   // Проверка обновления на GitHub Pages: при расхождении даты/времени сборки — жёсткая перезагрузка
   useEffect(() => {
-    const clientBuildDate = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_DATE : undefined;
-    const clientBuildTime = typeof process !== 'undefined' ? process.env?.REACT_APP_BUILD_TIME?.trim() : undefined;
+    const clientBuildDate = process.env.REACT_APP_BUILD_DATE;
+    const clientBuildTime = process.env.REACT_APP_BUILD_TIME?.trim();
     if (!clientBuildDate) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-    const base = typeof process !== 'undefined' ? process.env?.PUBLIC_URL || '' : '';
+    const base = process.env.PUBLIC_URL || '';
     const url = `${base}/build-info.json?t=${Date.now()}`;
     fetch(url, { cache: 'no-store', credentials: 'same-origin' })
       .then((r) => (r.ok ? r.json() : null))
@@ -1373,7 +1374,8 @@ function App() {
           </p>
         )}
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Flprog Web UI Client · Сборка: {BUILD_DATE} {BUILD_TIME}
+          Flprog Web UI Client · Сборка: {BUILD_DATE}
+          {BUILD_TIME ? ` ${BUILD_TIME}` : ''}
         </p>
       </div>
 

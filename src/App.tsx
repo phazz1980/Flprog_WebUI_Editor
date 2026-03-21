@@ -931,7 +931,8 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
           Открыть клиент
         </a>
         <p className="sidebar-left-build-date" style={{ marginTop: 'auto', paddingTop: 16, marginBottom: 0, fontSize: 11, color: '#9ca3af' }}>
-          Flprog Web UI · Сборка: {BUILD_DATE} {BUILD_TIME}
+          Flprog Web UI · Сборка: {BUILD_DATE}
+          {BUILD_TIME ? ` ${BUILD_TIME}` : ''}
         </p>
       </div>
       )}
