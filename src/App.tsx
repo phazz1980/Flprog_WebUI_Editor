@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Circle, Group, Layer as KonvaLayer, Line, Rect, Stage as KonvaStage, Text, Transformer } from 'react-konva';
 import Konva from 'konva';
 import { generateArduinoCode, buildImportJson, buildBlockNameWithStamp, formatCreationStamp } from './generator';
+import { buildEditorProjectFileJson, parseEditorProjectFromJson } from './editorProjectFile';
 import { contrastColor, getLuminance } from './contrastColor';
 import { useEditStore } from './store/editStore';
 import { useViewportSize } from './useViewportSize';
@@ -298,6 +299,7 @@ function App() {
     renameTab,
     removeTab,
     setWidgets,
+    applySnapshot,
   } = useEditStore();
 
   const [canvasZoom, setCanvasZoom] = useState(1);
@@ -359,6 +361,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
   const tabPickerRef = useRef<HTMLDivElement>(null);
   const tabPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const tabPickerDropdownRef = useRef<HTMLDivElement>(null);
+  const interfaceFileInputRef = useRef<HTMLInputElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const prevIsMobileRef = useRef(isMobile);
   useEffect(() => {
@@ -604,6 +607,52 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
     setDemoEditingInputId(null);
   };
 
+  const saveInterfaceToFile = useCallback(() => {
+    const json = buildEditorProjectFileJson({
+      widgets,
+      canvasConfig,
+      tabs,
+      activeTabId,
+    });
+    const name = `flprog-webui-interface_${formatCreationStamp()}.json`;
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [widgets, canvasConfig, tabs, activeTabId]);
+
+  const onInterfaceFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const text = String(reader.result ?? '');
+          const parsed = JSON.parse(text);
+          const result = parseEditorProjectFromJson(parsed);
+          if (!result.ok) {
+            window.alert(result.error);
+            return;
+          }
+          if (!window.confirm('Заменить текущий интерфейс (канва, вкладки, виджеты) данными из файла?')) {
+            return;
+          }
+          applySnapshot(result.snapshot);
+        } catch {
+          window.alert('Не удалось разобрать JSON. Проверьте файл.');
+        }
+      };
+      reader.onerror = () => window.alert('Ошибка чтения файла.');
+      reader.readAsText(file, 'UTF-8');
+    },
+    [applySnapshot],
+  );
+
   const handleDemoInputFocus = useCallback((id: string) => {
     setDemoEditingInputId(id);
   }, []);
@@ -758,6 +807,14 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
 
   return (
     <div className={`App app-root ${demoMode ? 'demo-mode' : ''}`}>
+      <input
+        ref={interfaceFileInputRef}
+        type="file"
+        accept=".json,application/json"
+        style={{ display: 'none' }}
+        aria-hidden
+        onChange={onInterfaceFileInputChange}
+      />
       {!demoMode && (
       <div className={`sidebar sidebar-left ${showLeftPanel ? 'mobile-open' : 'mobile-closed'}`}>
         <button className="mobile-sidebar-close" onClick={() => setShowLeftPanel(false)}>×</button>
@@ -899,37 +956,6 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <button
                 type="button"
                 className="tab-rename-button"
-                onClick={() => setGridVisible((v) => !v)}
-                title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
-              >
-                Сетка {gridVisible ? '▣' : '☐'}
-              </button>
-              <span className="editor-zoom-wrap">
-                <button
-                  type="button"
-                  className="tab-rename-button"
-                  onClick={() => setZoom(canvasZoom - zoomStep)}
-                  disabled={canvasZoom <= zoomMin}
-                  title="Уменьшить масштаб"
-                >
-                  −
-                </button>
-                <span className="editor-zoom-value" title="Масштаб канвы">
-                  {Math.round(canvasZoom * 100)}%
-                </span>
-                <button
-                  type="button"
-                  className="tab-rename-button"
-                  onClick={() => setZoom(canvasZoom + zoomStep)}
-                  disabled={canvasZoom >= zoomMax}
-                  title="Увеличить масштаб"
-                >
-                  +
-                </button>
-              </span>
-              <button
-                type="button"
-                className="tab-rename-button"
                 onClick={enterDemoMode}
                 title="Режим демонстрации"
               >
@@ -1050,37 +1076,6 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
           </button>
           {!isMobile && (
             <>
-              <button
-                type="button"
-                className="tab-rename-button"
-                onClick={() => setGridVisible((v) => !v)}
-                title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
-              >
-                Сетка {gridVisible ? '▣' : '☐'}
-              </button>
-              <span style={{ marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-                <button
-                  type="button"
-                  className="tab-rename-button"
-                  onClick={() => setZoom(canvasZoom - zoomStep)}
-                  disabled={canvasZoom <= zoomMin}
-                  title="Уменьшить масштаб"
-                >
-                  −
-                </button>
-                <span style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
-                  {Math.round(canvasZoom * 100)}%
-                </span>
-                <button
-                  type="button"
-                  className="tab-rename-button"
-                  onClick={() => setZoom(canvasZoom + zoomStep)}
-                  disabled={canvasZoom >= zoomMax}
-                  title="Увеличить масштаб"
-                >
-                  +
-                </button>
-              </span>
               <button
                 type="button"
                 className="tab-rename-button"
@@ -1213,6 +1208,66 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
         <div style={{ marginBottom: '8px', paddingRight: '44px' }}>
           <h3 style={{ marginTop: 0, marginBottom: 0 }}>Свойства</h3>
         </div>
+        <div
+          style={{
+            marginBottom: '14px',
+            paddingBottom: '12px',
+            borderBottom: '1px solid #e5e7eb',
+          }}
+        >
+          <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: '#374151' }}>
+            Сетка, масштаб, файл
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="tab-rename-button"
+              onClick={() => setGridVisible((v) => !v)}
+              title={gridVisible ? 'Скрыть сетку' : 'Показать сетку'}
+            >
+              Сетка {gridVisible ? '▣' : '☐'}
+            </button>
+            <span className="editor-zoom-wrap" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setZoom(canvasZoom - zoomStep)}
+                disabled={canvasZoom <= zoomMin}
+                title="Уменьшить масштаб"
+              >
+                −
+              </button>
+              <span className="editor-zoom-value" style={{ minWidth: '3ch', fontSize: '12px', textAlign: 'center' }} title="Масштаб канвы">
+                {Math.round(canvasZoom * 100)}%
+              </span>
+              <button
+                type="button"
+                className="tab-rename-button"
+                onClick={() => setZoom(canvasZoom + zoomStep)}
+                disabled={canvasZoom >= zoomMax}
+                title="Увеличить масштаб"
+              >
+                +
+              </button>
+            </span>
+            <button
+              type="button"
+              className="tab-rename-button"
+              onClick={saveInterfaceToFile}
+              title="Сохранить интерфейс в файл JSON"
+            >
+              💾
+            </button>
+            <button
+              type="button"
+              className="tab-rename-button"
+              onClick={() => interfaceFileInputRef.current?.click()}
+              title="Загрузить интерфейс из файла JSON"
+            >
+              📂
+            </button>
+          </div>
+        </div>
         {selectedId ? (
           <div>
             {(() => {
@@ -1320,18 +1375,8 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               const selectedWidget = widgets.find((w) => w.id === selectedId);
               if (!selectedWidget || selectedWidget.type === 'rect') return null;
               const isBoolLocked = selectedWidget.type === 'button' || selectedWidget.type === 'switch' || selectedWidget.type === 'led';
-              const isBidiWidget = selectedWidget.type === 'switch' || selectedWidget.type === 'slider' || selectedWidget.type === 'input';
               return (
                 <>
-                  {isBidiWidget && (
-                    <div style={{ marginBottom: '12px', padding: '8px', background: '#f0f9ff', borderRadius: '6px', border: '1px solid #bae6fd' }}>
-                      <div style={{ fontSize: '11px', color: '#0369a1', marginBottom: '6px', fontWeight: 600 }}>Две переменные в коде МК</div>
-                      <div style={{ fontSize: '12px', color: '#0c4a6e' }}>
-                        <code style={{ background: '#e0f2fe', padding: '2px 4px' }}>{selectedWidget.varName || selectedWidget.id}_out</code>{' // out'}<br />
-                        <code style={{ background: '#e0f2fe', padding: '2px 4px' }}>{selectedWidget.varName || selectedWidget.id}_in</code>{' // in'}
-                      </div>
-                    </div>
-                  )}
                   {selectedWidget.type === 'button' && (
                     <>
                       <label style={{ fontSize: '12px' }}>Текст на кнопке:</label>
@@ -1555,6 +1600,7 @@ const VIEWER_GITHUB_PAGES_URL = 'https://phazz1980.github.io/Flprog_WebUI_Editor
               <p><strong>Вкладки.</strong> Кнопка «+» добавляет вкладку; переключайтесь по ним и раскладывайте виджеты по экранам.</p>
               <p><strong>Виджеты.</strong> В левой панели: Кнопка, Переключатель, Слайдер, Поле ввода, LED, Метка, Прямоугольник. Выберите тип — виджет появится на канве. Перетаскивание и ресайз за углы (при выделении). Подпись — в свойстве «Caption».</p>
               <p><strong>Переменные.</strong> В свойствах виджета укажите «Variable Name». Кнопка, слайдер, поле ввода и переключатель отправляют значение на устройство; LED и метка отображают данные с устройства. Поддерживаются кириллические имена.</p>
+              <p><strong>Сетка, масштаб, файл.</strong> В правой панели («Свойства»): сетка, масштаб канвы, сохранение 💾 и загрузка 📂 интерфейса в JSON (канва, вкладки, виджеты). Можно также выбрать полный JSON импорта из окна кода, если в нём есть блок <code>ui</code>.</p>
               <p><strong>Генерация кода.</strong> «Сгенерировать код» — предпросмотр и скачивание .ino. «Получить блок (.ubi)» — блок для вставки в проект FLProg.</p>
               <p><strong>Симулятор.</strong> Запустите <code>npm run simulator</code>, затем «Отправить проект в симулятор». Во вьювере укажите адрес localhost:31337 и подключитесь.</p>
               <p><strong>Демо-режим.</strong> Кнопка «Демо» — проверка интерфейса на канве без симулятора (кнопки, слайдер, ввод).</p>

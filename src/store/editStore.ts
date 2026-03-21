@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Tab, Widget } from '../types';
 import { snapToGrid } from '../constants';
+import type { EditorUiSnapshot } from '../editorProjectFile';
 
 interface EditState {
   widgets: Widget[];
@@ -9,6 +10,7 @@ interface EditState {
   canvasConfig: { width: number; height: number; color: string };
   tabs: Tab[];
   activeTabId: string;
+  applySnapshot: (snapshot: EditorUiSnapshot) => void;
   setWidgets: (widgets: Widget[]) => void;
   addWidget: (type: Widget['type']) => void;
   updateWidget: (id: string, attrs: Partial<Widget>) => void;
@@ -74,6 +76,20 @@ export const useEditStore = create<EditState>((set) => ({
   canvasConfig: JSON.parse(localStorage.getItem(KEY.canvas) || '{"width":320,"height":480,"color":"#ffffff"}'),
   tabs: initialTabs,
   activeTabId: initialActiveTabId,
+  applySnapshot: (snapshot) => set(() => {
+    const { widgets, canvasConfig, tabs, activeTabId } = snapshot;
+    localStorage.setItem(KEY.widgets, JSON.stringify(widgets));
+    localStorage.setItem(KEY.canvas, JSON.stringify(canvasConfig));
+    localStorage.setItem(KEY.tabs, JSON.stringify(tabs));
+    localStorage.setItem(KEY.activeTabId, activeTabId);
+    return {
+      widgets,
+      canvasConfig,
+      tabs,
+      activeTabId,
+      selectedId: null,
+    };
+  }),
   setWidgets: (widgets) => {
     set({ widgets });
     localStorage.setItem(KEY.widgets, JSON.stringify(widgets));
