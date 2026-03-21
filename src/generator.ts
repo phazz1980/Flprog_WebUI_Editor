@@ -102,8 +102,13 @@ export const generateArduinoCode = (widgets: Widget[], canvasConfig: any, tabs?:
       w.text ?? '',
       tabIndex,
     ];
-    if (w.varType !== 'none' && w.varName && w.varName !== w.id) {
-      base.push(w.varName);
+    // Для Label имя переменной нужно в /config всегда, если varType !== 'none': иначе вьювер
+    // считает Label «без переменной» (как статичный текст), когда varName совпадает с id —
+    // тогда в compact нет 10-го поля и данные из /state не привязываются к виджету.
+    if (w.varType !== 'none' && w.varName) {
+      if (w.varName !== w.id || w.type === 'label') {
+        base.push(w.varName);
+      }
     }
     return base;
   });

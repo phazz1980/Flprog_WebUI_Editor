@@ -51,8 +51,10 @@ function buildConfig(widgets, tabs) {
       w.text ?? '',
       tabIndex,
     ];
-    if (w.varType !== 'none' && w.varName && w.varName !== w.id) {
-      base.push(w.varName);
+    if (w.varType !== 'none' && w.varName) {
+      if (w.varName !== w.id || w.type === 'label') {
+        base.push(w.varName);
+      }
     }
     return base;
   });
