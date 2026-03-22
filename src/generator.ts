@@ -305,6 +305,105 @@ export const generateArduinoCode = (
   }
   stateShortKeyParts.push('  server->print(",\\"m\\":"); server->print("\\""); server->print(ui_message); server->print("\\"");');
 
+  type StateSlotMeta = {
+    keyStr: string;
+    kind: 'bool' | 'int' | 'byte' | 'float' | 'string';
+    varName: string;
+  };
+  const stateSlots: StateSlotMeta[] = [];
+  let slotIdx = 0;
+  widgetsWithVars.forEach((w) => {
+    const isBidi = isBidirectional(w);
+    const valueVar =
+      w.varName === 'sound_enabled' ? 'sound_enabled_in' : isBidi ? `${w.varName}_in` : w.varName;
+    const outVar = isBidi ? `${w.varName}_out` : null;
+    const pushSlot = (varName: string) => {
+      let kind: StateSlotMeta['kind'] = 'int';
+      if (w.varType === 'bool') kind = 'bool';
+      else if (w.varType === 'float') kind = 'float';
+      else if (w.varType === 'byte') kind = 'byte';
+      else if (w.varType === 'int') kind = 'int';
+      else kind = 'string';
+      stateSlots.push({ keyStr: String(slotIdx), kind, varName });
+      slotIdx += 1;
+    };
+    if (isBidi) {
+      pushSlot(outVar!);
+      pushSlot(valueVar);
+    } else {
+      pushSlot(valueVar);
+    }
+  });
+  if (!hasSoundEnabledWidget) {
+    stateSlots.push({ keyStr: 's', kind: 'byte', varName: 'sound_enabled' });
+  }
+  stateSlots.push({ keyStr: 'm', kind: 'string', varName: 'ui_message' });
+
+  const stateDeltaIncludeMath = stateSlots.some((s) => s.kind === 'float')
+    ? '#include <math.h>\n'
+    : '';
+
+  const stateDeltaGlobals = `
+static unsigned long g_state_seq = 0;
+static bool g_state_have_last = false;
+${stateSlots
+  .map((slot, i) => {
+    if (slot.kind === 'float') return `static float g_last_slot_${i} = 0.0f;`;
+    if (slot.kind === 'string') return `static String g_last_slot_${i};`;
+    return `static long g_last_slot_${i} = 0;`;
+  })
+  .join('\n')}
+`;
+
+  const stateDeltaReadCurr = stateSlots
+    .map((slot, i) => {
+      if (slot.kind === 'bool') {
+        return `    long cur_slot_${i} = (${slot.varName} ? 1L : 0L);`;
+      }
+      if (slot.kind === 'float') {
+        return `    float cur_slot_${i} = ${slot.varName};`;
+      }
+      if (slot.kind === 'string') {
+        return `    String cur_slot_${i} = ${slot.varName};`;
+      }
+      return `    long cur_slot_${i} = (long)(${slot.varName});`;
+    })
+    .join('\n');
+
+  const stateDeltaChFlags = stateSlots
+    .map((slot, i) => {
+      if (slot.kind === 'float') {
+        return `    bool ch_slot_${i} = !g_state_have_last || (fabs((double)(cur_slot_${i} - g_last_slot_${i})) > 1.0e-6);`;
+      }
+      return `    bool ch_slot_${i} = !g_state_have_last || (cur_slot_${i} != g_last_slot_${i});`;
+    })
+    .join('\n');
+
+  const stateDeltaAnyChange =
+    stateSlots.length === 0 ? 'false' : stateSlots.map((_, i) => `ch_slot_${i}`).join(' || ');
+
+  const stateDeltaUpdateLast = stateSlots
+    .map((_, i) => `    g_last_slot_${i} = cur_slot_${i};`)
+    .join('\n');
+
+  const stateDeltaPatchEmit = `      bool first = true;
+${stateSlots
+  .map((slot, i) => {
+    const keyPart = slot.keyStr;
+    const valuePrint =
+      slot.kind === 'string'
+        ? `        server->print("\\""); server->print(${slot.varName}); server->print("\\"");`
+        : `        server->print(cur_slot_${i});`;
+    return `      if (ch_slot_${i}) {
+        if (!first) server->print(",");
+        first = false;
+        server->print("\\"${keyPart}\\":");
+${valuePrint}
+      }`;
+  })
+  .join('\n')}
+`;
+
   // Сборка вывода массива: [ elem0 , elem1 , ... ]
   const stateArrayLines: string[] = [];
   stateArrayParts.forEach((line, i) => {
@@ -316,7 +415,7 @@ export const generateArduinoCode = (
   const stateShortKeyCode = stateShortKeyParts.join('\n');
 
   return `${leadingBlockComment}#include "flprogWebServer.h"
-
+${stateDeltaIncludeMath}
 #define DEVICE_NAME ${deviceNameDefineLiteral}  // par
 int port = ${DEFAULT_API_PORT}; //par
 int info_port = ${DEFAULT_INFO_PORT}; //par
@@ -331,6 +430,7 @@ ${configJson}
 ${globalVars}
 ${hasSoundEnabledWidget ? '' : 'byte sound_enabled; // in, 0=выкл 1=уведомление 2=тревога\n'}
 String ui_message; // in
+${stateDeltaGlobals}
 bool alarm_reset = false; //out // выход сброса аварии: установите в true в своей логике для сброса сообщения и звука
 
 void setup() {
@@ -413,10 +513,39 @@ void handleState(FLProgWebServer *server) {
   server->print("Content-Type: application/json\\r\\n");
   server->print("Connection: close\\r\\n\\r\\n");
   String fmt = server->argumentValueAtKey("fmt");
+  if (server->hasArgumentKey("since")) {
+    fmt = "short";
+  }
   if (fmt == "short") {
-    // Вариант 2: короткие ключи "0", "1", ..., "s", "m"
+    String sinceStr = server->argumentValueAtKey("since");
+    bool hasSince = sinceStr.length() > 0;
+    unsigned long sinceNum = hasSince ? sinceStr.toInt() : 0UL;
+${stateDeltaReadCurr}
+${stateDeltaChFlags}
+    bool anyChange = ${stateDeltaAnyChange};
+    if (!hasSince || sinceNum != g_state_seq) {
+      g_state_seq++;
+      server->print("{\\"seq\\":");
+      server->print(g_state_seq);
+      server->print(",\\"full\\":");
 ${stateShortKeyCode}
-    server->print("}");
+      server->print("}}");
+      g_state_have_last = true;
+${stateDeltaUpdateLast}
+    } else if (!anyChange) {
+      server->print("{\\"seq\\":");
+      server->print(g_state_seq);
+      server->print(",\\"patch\\":{}}");
+    } else {
+      g_state_seq++;
+      server->print("{\\"seq\\":");
+      server->print(g_state_seq);
+      server->print(",\\"patch\\":{");
+${stateDeltaPatchEmit}
+      server->print("}}");
+      g_state_have_last = true;
+${stateDeltaUpdateLast}
+    }
   } else {
     // Вариант 1 (по умолчанию): массив по индексам [v0,v1,...,s,"m"]
     server->print("[");

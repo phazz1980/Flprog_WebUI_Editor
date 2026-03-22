@@ -177,6 +177,65 @@ let project = null; // { config, state, widgetsWithVars, hasSoundEnabledWidget }
 /** Режим "устройство отключено": /config и /state возвращают 503, вьювер показывает тусклые виджеты. */
 let connectionEnabled = true;
 
+/** Дельта /state?fmt=short&since= (как в прошивке): seq + full или patch. */
+let stateDeltaSeq = 0;
+let stateLastEmitted = null;
+
+function resetStateDelta() {
+  stateDeltaSeq = 0;
+  stateLastEmitted = null;
+}
+
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b)) {
+    return Math.abs(a - b) < 1e-6;
+  }
+  return String(a) === String(b);
+}
+
+/** @param {string|undefined|null} sinceRaw */
+function buildStateShortDeltaResponse(sinceRaw) {
+  const curr = getStateShort();
+  const sinceNum =
+    sinceRaw !== undefined && sinceRaw !== null && String(sinceRaw).trim() !== ''
+      ? parseInt(String(sinceRaw), 10)
+      : NaN;
+
+  if (!Number.isFinite(sinceNum)) {
+    stateDeltaSeq += 1;
+    stateLastEmitted = JSON.parse(JSON.stringify(curr));
+    return { seq: stateDeltaSeq, full: curr };
+  }
+
+  if (sinceNum !== stateDeltaSeq) {
+    stateDeltaSeq += 1;
+    stateLastEmitted = JSON.parse(JSON.stringify(curr));
+    return { seq: stateDeltaSeq, full: curr };
+  }
+
+  if (!stateLastEmitted) {
+    stateDeltaSeq += 1;
+    stateLastEmitted = JSON.parse(JSON.stringify(curr));
+    return { seq: stateDeltaSeq, full: curr };
+  }
+
+  const patch = {};
+  for (const k of Object.keys(curr)) {
+    if (!valuesEqual(curr[k], stateLastEmitted[k])) {
+      patch[k] = curr[k];
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return { seq: stateDeltaSeq, patch: {} };
+  }
+
+  stateDeltaSeq += 1;
+  stateLastEmitted = JSON.parse(JSON.stringify(curr));
+  return { seq: stateDeltaSeq, patch };
+}
+
 function handleLoad(body, res) {
   let data;
   try {
@@ -206,6 +265,7 @@ function handleLoad(body, res) {
   const state = buildInitialState(widgets);
 
   project = { config: configArray, state, widgetsWithVars, hasSoundEnabledWidget };
+  resetStateDelta();
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
   res.end(JSON.stringify({ ok: true, message: 'Project loaded' }));
 }
@@ -583,7 +643,11 @@ const server = http.createServer((req, res) => {
       return;
     }
     const fmt = parsed.query?.fmt;
-    const data = fmt === 'short' ? getStateShort() : getStateArray();
+    const sinceRaw = parsed.query?.since;
+    const data =
+      fmt === 'short'
+        ? buildStateShortDeltaResponse(sinceRaw)
+        : getStateArray();
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     res.end(JSON.stringify(data));
     return;

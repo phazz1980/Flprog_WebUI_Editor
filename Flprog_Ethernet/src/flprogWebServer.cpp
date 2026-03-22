@@ -414,7 +414,8 @@ void FLProgWebServer::parseArguments(String data)
         }
         FLProgWebServerRequestArgument &arg = _reqest.currentArgs[iarg];
         arg.key = urlDecode(data.substring(pos, equal_sign_index));
-        arg.value = urlDecode(data.substring(equal_sign_index + 1, next_arg_index));
+        int16_t valueEnd = (next_arg_index == -1) ? (int16_t)data.length() : next_arg_index;
+        arg.value = urlDecode(data.substring(equal_sign_index + 1, valueEnd));
         ++iarg;
         if (next_arg_index == -1)
             break;

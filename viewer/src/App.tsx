@@ -5,7 +5,14 @@ import Konva from 'konva';
 import { contrastColor } from './contrastColor';
 import { parseConfig } from './configParser';
 
-import { getStateValueByIndex, getSoundEnabled, getUiMessage, displayValue, type StatePayload } from './stateMap';
+import {
+  getStateValueByIndex,
+  getSoundEnabled,
+  getUiMessage,
+  displayValue,
+  mergeStateFromDeviceResponse,
+  type StatePayload,
+} from './stateMap';
 import { useViewportSize } from './useViewportSize';
 import { playNotificationOnce, startAlarmLoop, stopAlarm, isAlarmPlaying } from './soundPlayer';
 import { deviceFetch } from './deviceHttp';
@@ -530,6 +537,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
   const baseUrlRef = useRef<string | null>(null);
+  /** seq дельты /state; null — следующий запрос без since (полная синхронизация). */
+  const stateSeqRef = useRef<number | null>(null);
+  /** Копия state для merge дельты до следующего рендера (см. merge в poll). */
+  const stateForDeltaRef = useRef<StatePayload[] | Record<string, StatePayload>>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -646,6 +657,8 @@ function App() {
     setMkErrorLastAt(null);
     setMkErrorLogOpen(false);
     baseUrlRef.current = null;
+    stateSeqRef.current = null;
+    stateForDeltaRef.current = {};
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
@@ -691,6 +704,8 @@ function App() {
       setCanvasColor(parsed.canvasColor);
       setActiveTabIndex(0);
       setState({});
+      stateForDeltaRef.current = {};
+      stateSeqRef.current = null;
       setConnected(true);
       setConnecting(false);
       connectAbortRef.current = null;
@@ -751,6 +766,8 @@ function App() {
         setCanvasColor(parsed.canvasColor);
         setActiveTabIndex(0);
         setState({});
+        stateForDeltaRef.current = {};
+        stateSeqRef.current = null;
         setConnected(true);
         setConnecting(false);
         connectAbortRef.current = null;
@@ -875,6 +892,7 @@ function App() {
     const dropConnection = () => {
       stopAlarm();
       setError('Соединение потеряно');
+      stateSeqRef.current = null;
       setConnected(false);
     };
     const poll = async () => {
@@ -883,7 +901,12 @@ function App() {
       const ac = new AbortController();
       const timer = window.setTimeout(() => ac.abort(), STATE_POLL_TIMEOUT_MS);
       try {
-        const res = await deviceFetch(`${base}/state?fmt=short`, { signal: ac.signal });
+        const since = stateSeqRef.current;
+        // since первым: старый parseArguments в FLProgWebServer надёжно читает значение до '&';
+        // fmt последним — при необходимости прошивка всё равно включает short, если есть since.
+        const url =
+          since != null ? `${base}/state?since=${since}&fmt=short` : `${base}/state?fmt=short`;
+        const res = await deviceFetch(url, { signal: ac.signal });
         window.clearTimeout(timer);
         if (!res.ok) {
           pollFailStreakRef.current += 1;
@@ -892,7 +915,14 @@ function App() {
         }
         const data = await res.json();
         pollFailStreakRef.current = 0;
-        setState(data);
+        const prevSnap = stateForDeltaRef.current;
+        const { state: nextState, seq, didApply } = mergeStateFromDeviceResponse(prevSnap, data);
+        if (seq !== null) stateSeqRef.current = seq;
+        else stateSeqRef.current = null;
+        if (didApply) {
+          setState(nextState);
+          stateForDeltaRef.current = nextState;
+        }
       } catch {
         window.clearTimeout(timer);
         pollFailStreakRef.current += 1;

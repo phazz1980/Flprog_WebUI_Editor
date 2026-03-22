@@ -312,12 +312,28 @@ export function createUbiXmlSixx(
     if (!line.endsWith(';')) return;
     const stmt = line.slice(0, -1).trim();
     if (!/^\s*static\s+/.test(stmt)) return;
-    const m = stmt.match(/^\s*static\s+(.+?)\s+([a-zA-Z_][A-Za-z0-9_]*)\s*([\s\S]*)$/);
-    if (!m) return;
-    const firstPart = 'static ' + m[1].trim();
-    const namePart = m[2];
-    const rest = m[3].trim();
-    const lastPart = rest.startsWith('=') ? '= ' + escapeCodeForSixx(rest.slice(1).trim()) + ';' : ';';
+    // Нельзя парить «тип + имя» одним регэкспом: для "static unsigned long x = 0"
+    // нежадный (.+?) остановится на "long" как на имени переменной.
+    const eqPos = findTopLevelEquals(stmt);
+    let firstPart;
+    let namePart;
+    let lastPart;
+    if (eqPos >= 0) {
+      const leftSide = stmt.slice(0, eqPos).trim();
+      const valueSide = stmt.slice(eqPos + 1).trim();
+      const nameMatch = leftSide.match(/\b([A-Za-z_][A-Za-z0-9_]*)\s*$/);
+      if (!nameMatch) return;
+      namePart = nameMatch[1];
+      firstPart = leftSide.slice(0, nameMatch.index).trim();
+      lastPart = '= ' + escapeCodeForSixx(valueSide) + ';';
+    } else {
+      const nameMatch = stmt.match(/\b([A-Za-z_][A-Za-z0-9_]*)\s*$/);
+      if (!nameMatch) return;
+      namePart = nameMatch[1];
+      firstPart = stmt.slice(0, nameMatch.index).trim();
+      lastPart = ';';
+    }
+    if (!firstPart || !namePart) return;
     const declId = nextId(), declNameId = nextId(), declLastId = nextId(), declFirstId = nextId();
     declareXml += '\t\t\t\t\t<sixx.object sixx.id="' + declId + '" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n';
     declareXml += '\t\t\t\t\t\t<sixx.object sixx.id="' + declNameId + '" sixx.name="name" sixx.type="String" sixx.env="Core" >' + escapeHtml(namePart) + '</sixx.object>\n';
