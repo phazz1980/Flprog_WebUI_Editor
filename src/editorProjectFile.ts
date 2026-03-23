@@ -19,6 +19,12 @@ function clampCanvasSize(n: number): number {
   return Math.max(16, Math.min(16000, Math.round(n)));
 }
 
+function clampCanvasPos(n: number): number {
+  // Позиции виджета допускают 0 (верхний/левый край).
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(16000, Math.round(n)));
+}
+
 function parseTab(raw: unknown): Tab | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -37,11 +43,15 @@ function parseWidget(raw: unknown): Widget | null {
   const varType = (o.varType as Widget['varType']) ?? 'String';
   const vt = VAR_TYPES.has(varType) ? varType : 'String';
   const color = typeof o.color === 'string' && o.color ? o.color : '#3b82f6';
+  const xRaw = Number(o.x);
+  const yRaw = Number(o.y);
+  const x = snapToGrid(clampCanvasPos(xRaw));
+  const y = snapToGrid(clampCanvasPos(yRaw));
   const w: Widget = {
     id,
     type,
-    x: snapToGrid(clampCanvasSize(Number(o.x) || 0)),
-    y: snapToGrid(clampCanvasSize(Number(o.y) || 0)),
+    x,
+    y,
     width: snapToGrid(Math.max(10, clampCanvasSize(Number(o.width) || 40))),
     height: snapToGrid(Math.max(10, clampCanvasSize(Number(o.height) || 40))),
     text: o.text !== undefined ? String(o.text) : undefined,

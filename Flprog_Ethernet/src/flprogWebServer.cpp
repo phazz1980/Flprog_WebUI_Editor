@@ -403,6 +403,10 @@ void FLProgWebServer::parseArguments(String data)
     int16_t iarg;
     for (iarg = 0; iarg < (int16_t)_reqest.currentArgCount;)
     {
+        if (iarg != 0 && (iarg & 0x1F) == 0)
+        {
+            yield();
+        }
         int16_t equal_sign_index = data.indexOf('=', pos);
         int16_t next_arg_index = data.indexOf('&', pos);
         if ((equal_sign_index == -1) || ((equal_sign_index > next_arg_index) && (next_arg_index != -1)))
@@ -432,6 +436,10 @@ String FLProgWebServer::urlDecode(const String &text)
     uint16_t i = 0;
     while (i < len)
     {
+        if ((i & 0x3F) == 0)
+        {
+            yield();
+        }
         char decodedChar;
         char encodedChar = text.charAt(i++);
         if ((encodedChar == '%') && (i + 1 < len))
@@ -466,6 +474,7 @@ uint8_t FLProgWebServer::readStringUntil(char terminator)
     int16_t readChar;
     while (_server.available())
     {
+        yield();
         _startReadStringTime = millis();
         readChar = _server.read();
         if (readChar == terminator)
@@ -641,6 +650,10 @@ size_t FLProgWebServer::write(const uint8_t *buf, size_t size)
     }
     for (size_t i = 0; i < size; i++)
     {
+        if (i != 0 && (i & 0xFF) == 0)
+        {
+            yield();
+        }
         _writeBuffer[_writeBufferSize] = buf[i];
         _writeBufferSize++;
     }
