@@ -1,4 +1,5 @@
 #include "flprogWebServer.h"
+#include <ctype.h>
 
 FLProgWebServer::FLProgWebServer(FLProgAbstractTcpInterface *sourse, uint16_t port)
 {
@@ -25,7 +26,7 @@ void FLProgWebServer::addHandler(String uri, FLProgWebServerCallback callBack, u
 
     if (_handlersCount > 0)
     {
-        FLProgRequestHandler temp[_handlersCount];
+        FLProgRequestHandler *temp = new FLProgRequestHandler[_handlersCount];
 
         for (uint16_t i = 0; i < _handlersCount; i++)
         {
@@ -38,6 +39,7 @@ void FLProgWebServer::addHandler(String uri, FLProgWebServerCallback callBack, u
         {
             _handlers[i] = temp[i];
         }
+        delete[] temp;
     }
     else
     {
@@ -134,6 +136,11 @@ void FLProgWebServer::pool()
     }
     if (_status == FLPROG_WAIT_WEB_SERVER_READ_REQEST)
     {
+        if (!_server.connected())
+        {
+            stopConnection();
+            return;
+        }
         parseReqest();
         return;
     }
@@ -190,9 +197,23 @@ void FLProgWebServer::parseReqest()
     {
         int addr_start = _reqestString.indexOf(' ');
         int addr_end = _reqestString.indexOf(' ', addr_start + 1);
+        if ((addr_start < 0) || (addr_end <= addr_start))
+        {
+            sendDefault400Page();
+            stopConnection();
+            _step = FLPROG_WEB_SERVER_INACTION_STEP;
+            return;
+        }
         _reqest.method = getHttpMethodCode(_reqestString.substring(0, addr_start));
         _reqest.currentUri = _reqestString.substring(addr_start + 1, addr_end);
-        _reqest.currentVersion = atoi((_reqestString.substring(addr_end + 8)).c_str());
+        if (_reqestString.length() > (addr_end + 8))
+        {
+            _reqest.currentVersion = atoi((_reqestString.substring(addr_end + 8)).c_str());
+        }
+        else
+        {
+            _reqest.currentVersion = 0;
+        }
         _searchStr = "";
         int hasSearch = _reqest.currentUri.indexOf('?');
         if (hasSearch != -1)
@@ -203,25 +224,13 @@ void FLProgWebServer::parseReqest()
         _reqest.chunked = false;
         _reqest.clientContentLength = 0;
         _readingString = "";
-        if (_reqest.method == (FLPROG_WEB_SERVER_POST) || (_reqest.method == FLPROG_WEB_SERVER_PUT) || (_reqest.method == FLPROG_WEB_SERVER_PATCH) || (_reqest.method == FLPROG_WEB_SERVER_DELETE))
+        if (_reqest.headers)
         {
-            _step = FLPROG_WEB_SERVER_PARSE_POST_STEP_1;
+            delete[] _reqest.headers;
+            _reqest.headers = nullptr;
         }
-        else
-        {
-
-            if (_reqest.headers)
-            {
-                delete[] _reqest.headers;
-            }
-            _reqest.headerKeysCount = 0;
-            _step = FLPROG_WEB_SERVER_PARSE_GET_STEP_1;
-        }
-    }
-
-    if ((_step == FLPROG_WEB_SERVER_PARSE_POST_STEP_1) || (_step == FLPROG_WEB_SERVER_PARSE_POST_STEP_2))
-    {
-        _step = FLPROG_WEB_SERVER_INACTION_STEP;
+        _reqest.headerKeysCount = 0;
+        _step = FLPROG_WEB_SERVER_PARSE_GET_STEP_1;
     }
 
     if ((_step == FLPROG_WEB_SERVER_PARSE_GET_STEP_1) || (_step == FLPROG_WEB_SERVER_PARSE_GET_STEP_2))
@@ -273,6 +282,14 @@ void FLProgWebServer::sendDefault404Page()
     _server.println();
 }
 
+void FLProgWebServer::sendDefault400Page()
+{
+    _server.println("HTTP/1.1 400 Bad Request");
+    _server.println("Content-Type: text/plain");
+    _server.println("Connection: close");
+    _server.println();
+}
+
 void FLProgWebServer::sendDefault200Page()
 {
     _server.println("HTTP/1.1 200 OK");
@@ -284,7 +301,7 @@ void FLProgWebServer::sendDefault200Page()
 void FLProgWebServer::sendJson(String value)
 {
     _server.println("HTTP/1.1 200 OK");
-    _server.println("Content-Type: text/json");
+    _server.println("Content-Type: application/json");
     _server.println("Connection: close");
     _server.println();
     _server.print(value);
@@ -294,7 +311,7 @@ void FLProgWebServer::sendJson(String value)
 void FLProgWebServer::send403Page(String value)
 {
     _server.println("HTTP/1.1 403 Forbidden");
-    _server.println("Content-Type: text/htm");
+    _server.println("Content-Type: text/html");
     _server.println("Connection: close");
     _server.println();
     _server.print(value);
@@ -338,7 +355,14 @@ uint8_t FLProgWebServer::parseGetReqest()
         return FLPROG_SUCCESS;
     }
     headerName = _reqestString.substring(0, headerDiv);
-    headerValue = _reqestString.substring(headerDiv + 2);
+    if ((headerDiv + 1) < (int)_reqestString.length() && _reqestString[headerDiv + 1] == ' ')
+    {
+        headerValue = _reqestString.substring(headerDiv + 2);
+    }
+    else
+    {
+        headerValue = _reqestString.substring(headerDiv + 1);
+    }
     if (headerName.equalsIgnoreCase("Host"))
     {
         _reqest.hostHeader = headerValue;
@@ -352,7 +376,7 @@ void FLProgWebServer::addHeader(String headerName, String headerValue)
 {
     if (_reqest.headerKeysCount > 0)
     {
-        FLProgWebServerRequestArgument temp[_reqest.headerKeysCount];
+        FLProgWebServerRequestArgument *temp = new FLProgWebServerRequestArgument[_reqest.headerKeysCount];
 
         for (uint16_t i = 0; i < _reqest.headerKeysCount; i++)
         {
@@ -366,6 +390,7 @@ void FLProgWebServer::addHeader(String headerName, String headerValue)
             _reqest.headers[i].key = temp[i].key;
             _reqest.headers[i].value = temp[i].value;
         }
+        delete[] temp;
     }
     else
     {
@@ -446,8 +471,17 @@ String FLProgWebServer::urlDecode(const String &text)
         {
             temp[2] = text.charAt(i++);
             temp[3] = text.charAt(i++);
-
-            decodedChar = strtol(temp, NULL, 16);
+            if (isxdigit(temp[2]) && isxdigit(temp[3]))
+            {
+                decodedChar = strtol(temp, NULL, 16);
+            }
+            else
+            {
+                decoded += '%';
+                decoded += temp[2];
+                decoded += temp[3];
+                continue;
+            }
         }
         else
         {
@@ -467,9 +501,12 @@ String FLProgWebServer::urlDecode(const String &text)
 
 uint8_t FLProgWebServer::readStringUntil(char terminator)
 {
-    if (flprog::isTimer(_startReadStringTime, 10))
+    if (flprog::isTimer(_startReadStringTime, 1000))
     {
-        return FLPROG_SUCCESS;
+        sendDefault400Page();
+        stopConnection();
+        _step = FLPROG_WEB_SERVER_INACTION_STEP;
+        return FLPROG_WAIT;
     }
     int16_t readChar;
     while (_server.available())
@@ -583,7 +620,7 @@ uint8_t FLProgWebServer::getHttpMethodCode(String method)
     {
         return FLPROG_WEB_SERVER_MKACTIVITY;
     }
-    if (method.equalsIgnoreCase("CHECKOU"))
+    if (method.equalsIgnoreCase("CHECKOUT"))
     {
         return FLPROG_WEB_SERVER_CHECKOUT;
     }

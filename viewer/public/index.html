@@ -10,6 +10,7 @@
     <meta name="description" content="Flprog WebUI Client — просмотр и управление интерфейсом с МК" />
     <meta name="build-date" content="__BUILD_DATE__" />
     <meta name="build-signature" content="__BUILD_SIGNATURE__" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>Flprog WebUI Client</title>
     <script>
       (function() {
@@ -81,7 +82,7 @@
           if (!document.hidden) checkForNewVersion();
         });
         if (typeof navigator !== 'undefined' && navigator.serviceWorker && path) {
-          navigator.serviceWorker.register(path + '/sw.js', { scope: path + '/' }).catch(function() {});
+          navigator.serviceWorker.register(path + '/service-worker.js', { scope: path + '/' }).catch(function() {});
         }
       })();
     </script>

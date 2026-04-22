@@ -56,7 +56,7 @@ void setup()
   {
   }
 
-  flprog::printConsole(" Тест WebServer - Wifi ");
+  Serial.println("Тест WebServer - Wifi");
   pinMode(LED_BUILTIN, OUTPUT);
 
   /*

@@ -1,8 +1,21 @@
 {
   "short_name": "Flprog Edit",
   "name": "Flprog WebUI Edit",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
+  "theme_color": "#38bdf8",
   "background_color": "#ffffff"
 }

@@ -80,7 +80,7 @@
           if (!document.hidden) checkForNewVersion();
         });
         if (typeof navigator !== 'undefined' && navigator.serviceWorker && path) {
-          navigator.serviceWorker.register(path + '/sw.js', { scope: path + '/' }).catch(function() {});
+          navigator.serviceWorker.register(path + '/service-worker.js', { scope: path + '/' }).catch(function() {});
         }
       })();
     </script>

@@ -26,16 +26,16 @@ struct FLProgWebServerRequestArgument
 
 struct FLProgWebServerReqest
 {
-    uint8_t currentVersion;
+    uint8_t currentVersion = 0;
     String currentUri;
-    bool chunked;
-    int clientContentLength;
-    uint8_t method;
+    bool chunked = false;
+    int clientContentLength = 0;
+    uint8_t method = FLPROG_WEB_SERVER_GET;
     String hostHeader;
-    FLProgWebServerRequestArgument *headers;
+    FLProgWebServerRequestArgument *headers = nullptr;
     uint16_t headerKeysCount = 0;
-    FLProgWebServerRequestArgument *currentArgs;
-    uint16_t currentArgCount;
+    FLProgWebServerRequestArgument *currentArgs = nullptr;
+    uint16_t currentArgCount = 0;
 };
 
 class FLProgWebServer : public Print
@@ -74,7 +74,7 @@ public:
     void sendJson(String value);
 
     virtual size_t write(const uint8_t *buf, size_t size);
-    virtual size_t write(uint8_t byte) { return _server.write(&byte, 1); };
+    virtual size_t write(uint8_t byte) { return write(&byte, 1); };
 
     uint16_t getSkippingEvents() { return _skippingEvents; };
     void setSkippingEvents(uint16_t value) { _skippingEvents = value; };
@@ -89,6 +89,7 @@ private:
     uint8_t getHttpMethodCode(String method);
     void sendAnswer();
     void stopConnection();
+    void sendDefault400Page();
 
     void flush();
 
@@ -101,7 +102,7 @@ private:
     FLProgWebServerReqest _reqest;
     String _reqestString;
     String _searchStr;
-    FLProgRequestHandler *_handlers;
+    FLProgRequestHandler *_handlers = nullptr;
     uint16_t _handlersCount = 0;
     FLProgWebServerCallback _callBack_404 = 0;
     uint16_t _writeBufferSize = 0;
