@@ -13,19 +13,11 @@ const editorBuildDir = path.join(rootDir, 'build');
 const viewerBuildDir = path.join(viewerDir, 'build');
 const viewerPackagePath = path.join(viewerDir, 'package.json');
 
-// Базовый URL из homepage редактора (например https://user.github.io/Flprog_WebUI_Editor)
-const rootPackage = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-const baseUrl = (rootPackage.homepage || '').replace(/\/$/, '');
-const viewerHomepage = baseUrl ? `${baseUrl}/viewer` : '';
-
-if (!viewerHomepage) {
-  console.warn('В корневом package.json нет "homepage". Просмотрщик соберётся без базового пути.');
-}
-
+// Для GitHub Pages в подпапке viewer используем относительные пути
 const viewerPackage = JSON.parse(fs.readFileSync(viewerPackagePath, 'utf8'));
-viewerPackage.homepage = viewerHomepage;
+viewerPackage.homepage = ".";
 fs.writeFileSync(viewerPackagePath, JSON.stringify(viewerPackage, null, 2));
-console.log('Client homepage:', viewerHomepage || '(не задан)');
+console.log('Client homepage: . (относительные пути для подпапки viewer)');
 
 execSync('npm run build', { cwd: viewerDir, stdio: 'inherit' });
 
@@ -40,7 +32,11 @@ if (fs.existsSync(destViewerDir)) {
 }
 fs.mkdirSync(destViewerDir, { recursive: true });
 copyDir(viewerBuildDir, destViewerDir);
-console.log('Скопировано viewer/build → build/viewer');
+
+// Исправляем пути в index.html viewer для работы в подпапке
+fixViewerIndexPaths(destViewerDir);
+
+console.log('Скопировано viewer/build → build/viewer (с исправленными путями)');
 
 function copyDir(src, dest) {
   const entries = fs.readdirSync(src, { withFileTypes: true });
@@ -54,4 +50,20 @@ function copyDir(src, dest) {
       fs.copyFileSync(srcPath, destPath);
     }
   }
+}
+
+function fixViewerIndexPaths(viewerDir) {
+  const indexPath = path.join(viewerDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return;
+  
+  let html = fs.readFileSync(indexPath, 'utf8');
+  
+  // Исправляем пути для работы в подпапке
+  html = html.replace(/\/Flprog_WebUI_Editor\/viewer\//g, './');
+  html = html.replace(/href="\/Flprog_WebUI_Editor\/viewer\/manifest\.json"/g, 'href="./manifest.json"');
+  html = html.replace(/href="\/Flprog_WebUI_Editor\/viewer/g, 'href=".');
+  html = html.replace(/src="\/Flprog_WebUI_Editor\/viewer/g, 'src=".');
+  
+  fs.writeFileSync(indexPath, html);
+  console.log('Исправлены пути в viewer/index.html для работы в подпапке');
 }
